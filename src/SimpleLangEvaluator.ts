@@ -5,7 +5,7 @@ import { IRunnerPlugin } from "conductor/dist/conductor/runner/types";
 import { CharStream, CommonTokenStream, AbstractParseTreeVisitor } from "antlr4ng";
 import { SimpleLangLexer } from "./parser/src/SimpleLangLexer";
 import { SimpleLangParser, ProgContext, ExpressionContext } from "./parser/src/SimpleLangParser";
-import { SimpleLangVisitor } from "./parser/src/SimpleLangVisitor";
+import { SimpleLangVisitor } from "./parser/src/SimpleLangVisitor"; 
 
 
 enum InstructionType {
