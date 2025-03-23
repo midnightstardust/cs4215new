@@ -1,89 +1,152 @@
 import { BasicEvaluator } from "conductor/dist/conductor/runner";
 import { IRunnerPlugin } from "conductor/dist/conductor/runner/types";
-import { CharStream, CommonTokenStream, AbstractParseTreeVisitor } from 'antlr4ng';
-import { SimpleLangLexer } from './parser/src/SimpleLangLexer';
-import { ExpressionContext, ProgContext, SimpleLangParser } from './parser/src/SimpleLangParser';
-import { SimpleLangVisitor } from './parser/src/SimpleLangVisitor';
+import { CharStream, CommonTokenStream, AbstractParseTreeVisitor } from "antlr4ng";
+import { SimpleLangLexer } from "./parser/src/SimpleLangLexer";
+import { SimpleLangParser, ProgContext, ExpressionContext } from "./parser/src/SimpleLangParser";
+import { SimpleLangVisitor } from "./parser/src/SimpleLangVisitor";
 
-class SimpleLangEvaluatorVisitor extends AbstractParseTreeVisitor<number> implements SimpleLangVisitor<number> {
-    // Visit a parse tree produced by SimpleLangParser#prog
-    visitProg(ctx: ProgContext): number {
-        return this.visit(ctx.expression());
+
+enum InstructionType {
+    PUSH = "PUSH",
+    ADD = "ADD",
+    SUBTRACT = "SUBTRACT",
+    MULTIPLY = "MULTIPLY",
+    DIVIDE = "DIVIDE"
+}
+
+interface Instruction {
+    type: InstructionType;
+    operand?: number;
+}
+
+class BytecodeGenerator extends AbstractParseTreeVisitor<void> implements SimpleLangVisitor<void> {
+    public instructions: Instruction[] = [];
+
+    visitProg(ctx: ProgContext): void {
+        this.visit(ctx.expression());
     }
 
-    // Visit a parse tree produced by SimpleLangParser#expression
-    visitExpression(ctx: ExpressionContext): number {
-        if (ctx.getChildCount() === 1) {
-            // INT case
-            return parseInt(ctx.getText());
-        } else if (ctx.getChildCount() === 3) {
-            if (ctx.getChild(0).getText() === '(' && ctx.getChild(2).getText() === ')') {
-                // Parenthesized expression
-                return this.visit(ctx.getChild(1) as ExpressionContext);
+    visitExpression(ctx: ExpressionContext): void {
+        const childCount = ctx.getChildCount();
+        if (childCount === 1) {
+            const value = parseInt(ctx.getText());
+            this.instructions.push({ type: InstructionType.PUSH, operand: value });
+        } else if (childCount === 3) {
+            if (ctx.getChild(0).getText() === "(" && ctx.getChild(2).getText() === ")") {
+                this.visit(ctx.getChild(1) as ExpressionContext);
             } else {
-                // Binary operation
-                const left = this.visit(ctx.getChild(0) as ExpressionContext);
-                const op = ctx.getChild(1).getText();
-                const right = this.visit(ctx.getChild(2) as ExpressionContext);
-
-                switch (op) {
-                    case '+': return left + right;
-                    case '-': return left - right;
-                    case '*': return left * right;
-                    case '/':
-                        if (right === 0) {
-                            throw new Error("Division by zero");
-                        }
-                        return left / right;
-                    default:
-                        throw new Error(`Unknown operator: ${op}`);
+                this.visit(ctx.getChild(0) as ExpressionContext);
+                this.visit(ctx.getChild(2) as ExpressionContext);
+                const operator = ctx.getChild(1).getText();
+                if (operator === "+") {
+                    this.instructions.push({ type: InstructionType.ADD });
+                } else if (operator === "-") {
+                    this.instructions.push({ type: InstructionType.SUBTRACT });
+                } else if (operator === "*") {
+                    this.instructions.push({ type: InstructionType.MULTIPLY });
+                } else if (operator === "/") {
+                    this.instructions.push({ type: InstructionType.DIVIDE });
+                } else {
+                    throw new Error(`Unsupported operator: ${operator}`);
                 }
             }
+        } else {
+            throw new Error(`Invalid expression structure: ${ctx.getText()}`);
         }
-        
-        throw new Error(`Invalid expression: ${ctx.getText()}`);
     }
 
-    // Override the default result method from AbstractParseTreeVisitor
-    protected defaultResult(): number {
-        return 0;
-    }
-    
-    // Override the aggregate result method
-    protected aggregateResult(aggregate: number, nextResult: number): number {
-        return nextResult;
+    protected defaultResult(): void { /* no-op */ }
+    protected aggregateResult(_aggregate: void, _nextResult: void): void { /* no-op */ }
+}
+
+class VirtualMachine {
+    private stack: number[] = [];
+
+    execute(instructions: Instruction[]): number {
+        for (const inst of instructions) {
+            switch (inst.type) {
+                case InstructionType.PUSH:
+                    if (inst.operand === undefined) {
+                        throw new Error("PUSH requires an operand.");
+                    }
+                    this.stack.push(inst.operand);
+                    break;
+                case InstructionType.ADD: {
+                    const b = this.stack.pop();
+                    const a = this.stack.pop();
+                    if (a === undefined || b === undefined) {
+                        throw new Error("Insufficient values on stack for ADD.");
+                    }
+                    this.stack.push(a + b);
+                    break;
+                }
+                case InstructionType.SUBTRACT: {
+                    const b = this.stack.pop();
+                    const a = this.stack.pop();
+                    if (a === undefined || b === undefined) {
+                        throw new Error("Insufficient values on stack for SUBTRACT.");
+                    }
+                    this.stack.push(a - b);
+                    break;
+                }
+                case InstructionType.MULTIPLY: {
+                    const b = this.stack.pop();
+                    const a = this.stack.pop();
+                    if (a === undefined || b === undefined) {
+                        throw new Error("Insufficient values on stack for MULTIPLY.");
+                    }
+                    this.stack.push(a * b);
+                    break;
+                }
+                case InstructionType.DIVIDE: {
+                    const b = this.stack.pop();
+                    const a = this.stack.pop();
+                    if (a === undefined || b === undefined) {
+                        throw new Error("Insufficient values on stack for DIVIDE.");
+                    }
+                    if (b === 0) {
+                        throw new Error("Division by zero.");
+                    }
+                    this.stack.push(a / b);
+                    break;
+                }
+                default:
+                    throw new Error(`Unknown instruction type: ${inst.type}`);
+            }
+        }
+        if (this.stack.length !== 1) {
+            throw new Error("Unexpected stack state after execution.");
+        }
+        return this.stack[0];
     }
 }
 
 export class SimpleLangEvaluator extends BasicEvaluator {
-    private executionCount: number;
-    private visitor: SimpleLangEvaluatorVisitor;
+    private runCount: number = 0;
 
-    constructor(conductor: IRunnerPlugin) {
-        super(conductor);
-        this.executionCount = 0;
-        this.visitor = new SimpleLangEvaluatorVisitor();
+    constructor(plugin: IRunnerPlugin) {
+        super(plugin);
     }
 
-    async evaluateChunk(chunk: string): Promise<void> {
-        this.executionCount++;
+    async evaluateChunk(code: string): Promise<void> {
+        this.runCount++;
         try {
-            // Create the lexer and parser
-            const inputStream = CharStream.fromString(chunk);
-            const lexer = new SimpleLangLexer(inputStream);
-            const tokenStream = new CommonTokenStream(lexer);
-            const parser = new SimpleLangParser(tokenStream);
-            
-            // Parse the input
+            const input = CharStream.fromString(code);
+            const lexer = new SimpleLangLexer(input);
+            const tokens = new CommonTokenStream(lexer);
+            const parser = new SimpleLangParser(tokens);
+
             const tree = parser.prog();
-            
-            // Evaluate the parsed tree
-            const result = this.visitor.visit(tree);
-            
-            // Send the result to the REPL
-            this.conductor.sendOutput(`Result of expression: ${result}`);
-        }  catch (error) {
-            // Handle errors and send them to the REPL
+
+            const generator = new BytecodeGenerator();
+            generator.visit(tree);
+            const instructions = generator.instructions;
+
+            const vm = new VirtualMachine();
+            const result = vm.execute(instructions);
+
+            this.conductor.sendOutput(`Result: ${result}`);
+        } catch (error) {
             if (error instanceof Error) {
                 this.conductor.sendOutput(`Error: ${error.message}`);
             } else {
