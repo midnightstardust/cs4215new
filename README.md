@@ -1,4 +1,4 @@
-#Fair use declaration + citations:
+# Fair use declaration + citations:
 Code has been copied/referenced to some extent from these sources
 1. https://github.com/dyigitpolat/test_antlr_conductor
 2. Sourceacademy Homeworks
