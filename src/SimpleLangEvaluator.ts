@@ -1,3 +1,5 @@
+//Fair use declaration/citation: Refer to the readme.md.
+
 import { BasicEvaluator } from "conductor/dist/conductor/runner";
 import { IRunnerPlugin } from "conductor/dist/conductor/runner/types";
 import { CharStream, CommonTokenStream, AbstractParseTreeVisitor } from "antlr4ng";
