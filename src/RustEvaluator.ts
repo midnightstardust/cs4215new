@@ -160,7 +160,6 @@ class RustEvaluatorVM {
     }
 }
 
-
 export class RustEvaluator extends BasicEvaluator {
     private runCount: number = 0;
 
@@ -170,24 +169,17 @@ export class RustEvaluator extends BasicEvaluator {
 
     async evaluateChunk(code: string): Promise<void> {
         this.runCount++;
-        try {
-            const input = CharStream.fromString(code);
-            const lexer = new RustLexer(input);
-            const tokens = new CommonTokenStream(lexer);
-            const parser = new RustParser(tokens);
-            const tree = parser.crate();
-            const generator = new RustEvaluatorBytecodeGenerator();
-            generator.visit(tree);
-            const ops = generator.ops;
-            const vm = new RustEvaluatorVM();
-            const result = vm.run(ops);
-            this.conductor.sendOutput(`Result: ${result}`);
-        } catch (error) {
-            if (error instanceof Error) {
-                this.conductor.sendOutput(`Error: ${error.message}`);
-            } else {
-                this.conductor.sendOutput(`Error: ${String(error)}`);
-            }
-        }
+        const input = CharStream.fromString(code);
+        const lexer = new RustLexer(input);
+        const tokens = new CommonTokenStream(lexer);
+        const parser = new RustParser(tokens);
+        const tree = parser.crate();
+        const generator = new RustEvaluatorBytecodeGenerator();
+        generator.visit(tree);
+        throw new Error(`AST Dump:\n${tree.toStringTree(parser.ruleNames)}`);
+        // const ops = generator.ops;
+        // const vm = new RustEvaluatorVM();
+        // const result = vm.run(ops);
+        // this.conductor.sendOutput(`Result: ${result}`);
     }
 }
