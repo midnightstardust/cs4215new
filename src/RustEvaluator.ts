@@ -126,10 +126,11 @@ class SimpleVM {
                     throw new Error(`Unknown op: ${op.type}`);
             }
         }
-        if (this.stack.length === 0) {
-            throw new Error("Stack is empty after execution");
+        const result = this.stack.pop();
+        if (result === undefined) {
+            throw new Error(`Stack is empty after execution. Ops: ${JSON.stringify(ops)}`);
         }
-        return this.stack.pop()!;
+        return result;
     }
 }
 
