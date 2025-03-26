@@ -90,65 +90,76 @@ class RustEvaluatorBytecodeGenerator extends AbstractParseTreeVisitor<void> impl
 
 class RustEvaluatorVM {
     private stack: number[] = [];
+    private history: string[] = [];
 
     run(ops: Op[]): number {
         for (const op of ops) {
             switch (op.type) {
                 case OpType.PUSH:
                     if (op.operand === undefined) {
-                        throw new Error("PUSH operation missing operand");
+                        throw new Error("PUSH operation missing operand. Stack: " + JSON.stringify(this.stack));
                     }
                     this.stack.push(op.operand);
+                    this.history.push(`PUSH ${op.operand} => [${this.stack.join(", ")}]`);
                     break;
                 case OpType.ADD: {
                     const b = this.stack.pop();
                     const a = this.stack.pop();
                     if (a === undefined || b === undefined) {
-                        throw new Error("Stack underflow on ADD");
+                        throw new Error("Stack underflow on ADD. Stack: " + JSON.stringify(this.stack));
                     }
-                    this.stack.push(a + b);
+                    const result = a + b;
+                    this.stack.push(result);
+                    this.history.push(`ADD ${a} + ${b} = ${result} => [${this.stack.join(", ")}]`);
                     break;
                 }
                 case OpType.SUB: {
                     const b = this.stack.pop();
                     const a = this.stack.pop();
                     if (a === undefined || b === undefined) {
-                        throw new Error("Stack underflow on SUB");
+                        throw new Error("Stack underflow on SUB. Stack: " + JSON.stringify(this.stack));
                     }
-                    this.stack.push(a - b);
+                    const result = a - b;
+                    this.stack.push(result);
+                    this.history.push(`SUB ${a} - ${b} = ${result} => [${this.stack.join(", ")}]`);
                     break;
                 }
                 case OpType.MUL: {
                     const b = this.stack.pop();
                     const a = this.stack.pop();
                     if (a === undefined || b === undefined) {
-                        throw new Error("Stack underflow on MUL");
+                        throw new Error("Stack underflow on MUL. Stack: " + JSON.stringify(this.stack));
                     }
-                    this.stack.push(a * b);
+                    const result = a * b;
+                    this.stack.push(result);
+                    this.history.push(`MUL ${a} * ${b} = ${result} => [${this.stack.join(", ")}]`);
                     break;
                 }
                 case OpType.DIV: {
                     const b = this.stack.pop();
                     const a = this.stack.pop();
                     if (a === undefined || b === undefined) {
-                        throw new Error("Stack underflow on DIV");
+                        throw new Error("Stack underflow on DIV. Stack: " + JSON.stringify(this.stack));
                     }
                     if (b === 0) {
-                        throw new Error("Division by zero");
+                        throw new Error("Division by zero. Stack: " + JSON.stringify(this.stack));
                     }
-                    this.stack.push(Math.floor(a / b));
+                    const result = Math.floor(a / b);
+                    this.stack.push(result);
+                    this.history.push(`DIV ${a} / ${b} = ${result} => [${this.stack.join(", ")}]`);
                     break;
                 }
                 default:
-                    throw new Error(`Unknown operation: ${op.type}`);
+                    throw new Error(`Unknown operation: ${op.type}. Stack: ` + JSON.stringify(this.stack));
             }
         }
         if (this.stack.length !== 1) {
-            throw new Error("Final stack did not resolve to a single value");
+            throw new Error("Final stack did not resolve to a single value. Stack: " + JSON.stringify(this.stack) + " History: " + JSON.stringify(this.history));
         }
         return this.stack[0];
     }
 }
+
 
 export class RustEvaluator extends BasicEvaluator {
     private runCount: number = 0;
