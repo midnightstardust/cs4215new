@@ -126,10 +126,13 @@ class SimpleVM {
                     throw new Error(`Unknown op: ${op.type}`);
             }
         }
-        if (this.stack.length !== 1) throw new Error("Final stack error");
-        return this.stack[0];
+        if (this.stack.length === 0) {
+            throw new Error("Stack is empty after execution");
+        }
+        return this.stack.pop()!;
     }
 }
+
 
 export class RustEvaluator extends BasicEvaluator {
     private counter = 0;
