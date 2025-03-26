@@ -131,7 +131,7 @@ class SimpleVM {
     }
 }
 
-export class SimpleRustEvaluator extends BasicEvaluator {
+export class RustEvaluator extends BasicEvaluator {
     private counter = 0;
     constructor(plugin: IRunnerPlugin) {
         super(plugin);
