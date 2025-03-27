@@ -5,16 +5,22 @@ import { BasicEvaluator } from "conductor/dist/conductor/runner";
 import { IRunnerPlugin } from "conductor/dist/conductor/runner/types";
 import { CharStream, CommonTokenStream } from "antlr4ng";
 import { RustLexer } from "./parser/src/RustLexer";
-import { CrateContext, ExpressionContext, LiteralExpressionContext, RustParser } from "./parser/src/RustParser";
- 
+import { BlockExpressionContext, CrateContext, ExpressionContext, ExpressionStatementContext, ExpressionWithBlockContext, IdentifierContext, LetStatementContext, LiteralExpressionContext, PathExpressionContext, RustParser, StatementContext, StatementsContext } from "./parser/src/RustParser";
+
 const DEBUG = true;
 
+const UNDEFINED = "undefined";
+
 enum InstructionType {
-    PUSH = "PUSH",
-    ADD = "ADD",
-    SUB = "SUB",
-    MUL = "MUL",
-    DIV = "DIV"
+    PUSH   = "PUSH",
+    ADD    = "ADD",
+    SUB    = "SUB",
+    MUL    = "MUL",
+    DIV    = "DIV",
+    POP    = "POP",
+    ENTER  = "ENTER",
+    LOAD   = "LOAD",
+    ASSIGN = "ASSIGN",
 }
 
 interface Instruction {
@@ -28,29 +34,66 @@ const debug = (...s: any[])  => {
     }
 }
 
+class CompileError extends Error {
+    public constructor(message?: string) {
+        super(message);
+    }
+}
+
+class VMError extends Error {
+    public constructor(message?: string) {
+        super(message);
+    }
+}
+
 class RustCompiler {
     private instructions: Instruction[];
     private parser: RustParser;
     private binaryArithmeticTextToInstructionType: { [name: string]: InstructionType } = {
-        '+': InstructionType.ADD,
-        '-': InstructionType.SUB,
-        '*': InstructionType.MUL,
-        '/': InstructionType.DIV
+        "+": InstructionType.ADD,
+        "-": InstructionType.SUB,
+        "*": InstructionType.MUL,
+        "/": InstructionType.DIV
     };
+    private envStack: Map<string, any>[];
 
     private isBinaryArithmeticOperation(expr: ExpressionContext) {
-        return expr.getChildCount() === 3 && ['+', '-', '*', '/'].includes(expr.getChild(1).getText());
+        return expr.getChildCount() === 3 && ["+", "-", "*", "/"].includes(expr.getChild(1).getText());
     }
 
     private isBracketExpression(expr: ExpressionContext) {
-        return expr.getChildCount() === 3 && expr.getChild(0).getText() === '(' && expr.getChild(2).getText() === ')'
+        return expr.getChildCount() === 3 && expr.getChild(0).getText() === "(" && expr.getChild(2).getText() === ")";
+    }
+
+    private isAssignmentExpression(expr: ExpressionContext) {
+        return expr.getChildCount() === 3 && expr.getChild(1).getText() === '=';
+    }
+
+    private inEnv(sym: string): boolean {
+        return this.envStack.some((map) => map.has(sym));
+    }
+
+    private getNON_KEYWORD_IDENTIFIERFromPathExpression(expr: PathExpressionContext | null): antlr.TerminalNode | null {
+        return expr?.pathInExpression()?.pathExprSegment(0)?.pathIdentSegment()?.identifier()?.NON_KEYWORD_IDENTIFIER();
+    }
+
+    private NOTDECLARED(name: string): string {
+        return `${name} not declared`;
+    }
+
+    private UNABLETOEVAL(expr: antlr.ParserRuleContext): string {
+        return `Unable to evaluate: ${expr.toStringTree(this.parser)}`;
+    }
+
+    private DUPLIDENTIFIER(name: string): string {
+        return `duplicate identifier: ${name}`;
     }
 
     private visit(_expr: antlr.ParserRuleContext): void {
         if (_expr.ruleIndex === RustParser.RULE_expression) {
             const expr = _expr as ExpressionContext;
 
-            if (expr.getChildCount() == 1) {
+            if (expr.getChildCount() === 1) {
                 this.visit(expr.getChild(0) as antlr.ParserRuleContext);
             } else if(this.isBinaryArithmeticOperation(expr)) {
                 this.visit(expr.getChild(0) as antlr.ParserRuleContext);
@@ -58,40 +101,137 @@ class RustCompiler {
 
                 const op = expr.getChild(1).getText();
                 const instructType = this.binaryArithmeticTextToInstructionType[op];
-                debug(`${_expr.toStringTree(this.parser)} is an expression; compile ${instructType}`)
                 this.instructions.push({ type: instructType });
             } else if(this.isBracketExpression(expr)) {
                 this.visit(expr.getChild(1) as antlr.ParserRuleContext);
+            } else if(this.isAssignmentExpression(expr)) {
+                this.visit(expr.getChild(2) as antlr.ParserRuleContext);
+                // first assume lhs of assgn is always identifier
+                // have to add indexing into lists when we do list
+                const identifier = this.getNON_KEYWORD_IDENTIFIERFromPathExpression((expr.getChild(0) as ExpressionContext).getChild(0) as PathExpressionContext);
+                if (identifier === null || identifier === undefined) {
+                    throw new CompileError(this.UNABLETOEVAL(_expr));
+                }
+                const variableName = identifier.getText();
+                if (!this.inEnv(variableName)) {
+                    throw new CompileError(this.NOTDECLARED(variableName));
+                }
+                this.instructions.push({ type: InstructionType.ASSIGN, operand: variableName });
+                this.instructions.push({ type: InstructionType.PUSH, operand: UNDEFINED });
             } else {
-                throw new Error(`Unable to evaluate: ${_expr.toStringTree(this.parser)}`);
+                throw new CompileError(this.UNABLETOEVAL(_expr));
             }
         } else if (_expr.ruleIndex === RustParser.RULE_literalExpression) {
             const expr = _expr as LiteralExpressionContext;
 
-            debug(`${_expr.toStringTree(this.parser)} is a literal expression; compile to PUSH ${expr.INTEGER_LITERAL().toString()}`);
             this.instructions.push({ type: InstructionType.PUSH, operand: parseInt(expr.INTEGER_LITERAL().toString())});
-
+        } else if (_expr.ruleIndex === RustParser.RULE_statements) {
+            const expr = _expr as StatementsContext;
+            for(const statement of expr.statement()) {
+                this.visit(statement);
+                this.instructions.push({ type: InstructionType.POP });
+            }
+            this.instructions.pop();
+        } else if (_expr.ruleIndex === RustParser.RULE_statement) {
+            const expr = _expr as StatementContext;
+            if (expr.SEMI()) {
+                this.instructions.push({ type: InstructionType.PUSH, operand: UNDEFINED })
+            } else {
+                this.visit(expr.getChild(0) as antlr.ParserRuleContext);
+            }
+        } else if (_expr.ruleIndex === RustParser.RULE_expressionStatement) {
+            const expr = _expr as ExpressionStatementContext;
+            this.visit(expr.getChild(0) as antlr.ParserRuleContext);
+        } else if (_expr.ruleIndex === RustParser.RULE_expressionWithBlock) {
+            const expr = _expr as ExpressionWithBlockContext;
+            this.visit(expr.getChild(expr.getChildCount() - 1) as antlr.ParserRuleContext);
+        } else if (_expr.ruleIndex === RustParser.RULE_blockExpression) {
+            const expr = _expr as BlockExpressionContext;
+            const statements = expr.statements();
+            if (statements) {
+                const newEnv = new Map<string, any>();
+                this.envStack.push(newEnv);
+                this.instructions.push({ type: InstructionType.ENTER, operand: this.envStack.slice() });
+                this.visit(statements);
+                this.envStack.pop();
+                this.instructions.push({ type: InstructionType.ENTER, operand: this.envStack.slice() });
+            } else {
+                this.instructions.push({ type: InstructionType.PUSH, operand: UNDEFINED })
+            }
+        } else if (_expr.ruleIndex === RustParser.RULE_letStatement) {
+            // we only support let a;
+            // no initial assignment allowed;
+            const expr = _expr as LetStatementContext;
+            const variableName = expr.patternNoTopAlt().patternWithoutRange()?.identifierPattern()?.identifier()?.NON_KEYWORD_IDENTIFIER()?.getText();
+            if (variableName === null || variableName === undefined) {
+                throw new CompileError(this.UNABLETOEVAL(_expr));
+            }
+            if (this.envStack[this.envStack.length - 1].has(variableName)) {
+                throw new CompileError(this.DUPLIDENTIFIER(variableName));
+            }
+            this.envStack[this.envStack.length - 1].set(variableName, UNDEFINED);
+            this.instructions.push({ type: InstructionType.PUSH, operand: UNDEFINED });
+        } else if(_expr.ruleIndex === RustParser.RULE_pathExpression) {
+            // a path expression is a repesentation of path (think namespace1 :: namespace2 :: variablename)
+            // we assume all path expressions are identifiers aka variable names
+            const expr = _expr as PathExpressionContext;
+            const identifier = this.getNON_KEYWORD_IDENTIFIERFromPathExpression(expr);
+            if (identifier === null || identifier === undefined) {
+                throw new CompileError(this.UNABLETOEVAL(_expr));
+            }
+            const variableName = identifier.getText();
+            if (!this.inEnv(variableName)) {
+                throw new CompileError(this.NOTDECLARED(variableName));
+            }
+            this.instructions.push({ type: InstructionType.LOAD, operand: variableName });
         } else {
-            throw new Error(`Unable to evaluate: ${_expr.toStringTree(this.parser)}`);
+            throw new CompileError(this.UNABLETOEVAL(_expr));
         }
     }
 
     public compile(parser: RustParser, crate: CrateContext): Instruction[] {
         this.instructions = [];
         this.parser = parser;
-        // assume main's body only has one statement first (must end in a ;)
-        this.visit(crate.item(0).visItem().function_().blockExpression().statements().statement(0).expressionStatement().expression());
+        this.envStack = [];
+        this.visit(crate.item(0).visItem().function_().blockExpression());
         return this.instructions;
     }
 }
 
 class SimpleVirtualMachine {
-    private stack: number[] = [];
+    private envs: Map<string, any>[];
+    private stack: any[];
+
+    private loadFromEnv(name: string) : any {
+        for(let i = this.envs.length - 1; i >= 0; i--) {
+            const v = this.envs[i].get(name);
+            if (v === UNDEFINED) {
+                console.log(`VM WARNING: value is undefined`);
+            }
+            return v;
+        }
+        throw new VMError(`${name} is not declared`);
+    }
+
+    private assignToEnv(name: string, value: any) {
+        for(let i = this.envs.length - 1; i >= 0; i--) {
+            if (this.envs[i].has(name)) {
+                this.envs[i].set(name, value);
+                return;
+            }
+        }
+        throw new VMError(`${name} is not declared`);
+    }
+
     public execute(instructions: Instruction[]) : number {
-        this.stack = []
+        this.stack = [];
+        this.envs = [];
         for(const instruct of instructions) {
             switch(instruct.type) {
                 case InstructionType.PUSH: {
+                    if (instruct.operand === null || instruct.operand === undefined) {
+                        throw new VMError("PUSH missing operand");
+                    }
                     this.stack.push(instruct.operand);
                     break;
                 }
@@ -117,13 +257,36 @@ class SimpleVirtualMachine {
                     const b = this.stack.pop();
                     const a = this.stack.pop();
                     if (b === 0) {
-                        throw new Error("Division by zero");
+                        throw new VMError("Division by zero");
                     }
                     this.stack.push(Math.floor(a / b));
                     break;
                 }
+                case InstructionType.POP: {
+                    if (this.stack.length === 0) {
+                        throw new VMError("stack is empty");
+                    }
+                    this.stack.pop();
+                    break;
+                }
+                case InstructionType.ENTER: {
+                    if (instruct.operand === null || instruct.operand === undefined) {
+                        throw new VMError("ENTER missing operand");
+                    }
+                    this.envs = instruct.operand;
+                    break;
+                }
+                case InstructionType.LOAD: {
+                    this.stack.push(this.loadFromEnv(instruct.operand));
+                    break;
+                }
+                case InstructionType.ASSIGN: {
+                    const v = this.stack.pop();
+                    this.assignToEnv(instruct.operand, v);
+                    break;
+                }
                 default: {
-                    throw new Error(`Unknown instruction type: ${instruct.type}`);
+                    throw new VMError(`Unknown instruction type: ${instruct.type}`);
                 }
             }
         }
@@ -155,7 +318,11 @@ export class RustEvaluator extends BasicEvaluator {
             const result = vm.execute(instructions);
             this.conductor.sendOutput(`Result:\n${result}`);
         } catch (error) {
-            if (error instanceof Error) {
+            if (error instanceof CompileError) {
+                this.conductor.sendOutput(`Compile Error: ${error.message}`)
+            } else if(error instanceof VMError) {
+                this.conductor.sendOutput(`VM execution Error: ${error.message}`)
+            } else if (error instanceof Error) {
                 this.conductor.sendOutput(`Error: ${error.message}`);
             } else {
                 this.conductor.sendOutput(`Error: ${String(error)}`);
