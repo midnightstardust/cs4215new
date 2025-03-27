@@ -22,7 +22,7 @@ interface Instruction {
     operand?: any;
 }
 
-const debug = (...s: string[])  => {
+const debug = (...s: any[])  => {
     if (DEBUG) {
         console.log(...s);
     }
@@ -38,14 +38,6 @@ class RustCompiler {
         '/': InstructionType.DIV
     };
 
-    private isExpression(expr: antlr.ParserRuleContext) {
-       return expr.ruleIndex === RustParser.RULE_expression;
-    }
-
-    private isLiteralExpression(expr: antlr.ParserRuleContext) {
-        return expr.ruleIndex === RustParser.RULE_literalExpression;
-    }
-
     private isBinaryArithmeticOperation(expr: ExpressionContext) {
         return expr.getChildCount() === 3 && ['+', '-', '*', '/'].includes(expr.getChild(1).getText());
     }
@@ -55,7 +47,7 @@ class RustCompiler {
     }
 
     private visit(_expr: antlr.ParserRuleContext): void {
-        if (this.isExpression(_expr)) {
+        if (_expr.ruleIndex === RustParser.RULE_expression) {
             const expr = _expr as ExpressionContext;
 
             if (expr.getChildCount() == 1) {
@@ -73,7 +65,7 @@ class RustCompiler {
             } else {
                 throw new Error(`Unable to evaluate: ${_expr.toStringTree(this.parser)}`);
             }
-        } else if (this.isLiteralExpression(_expr)) {
+        } else if (_expr.ruleIndex === RustParser.RULE_literalExpression) {
             const expr = _expr as LiteralExpressionContext;
 
             debug(`${_expr.toStringTree(this.parser)} is a literal expression; compile to PUSH ${expr.INTEGER_LITERAL().toString()}`);
@@ -93,19 +85,59 @@ class RustCompiler {
     }
 }
 
-// class VirtualMachine {
-//     public execute()
-// }
+class SimpleVirtualMachine {
+    private stack: number[] = [];
+    public execute(instructions: Instruction[]) : number {
+        this.stack = []
+        for(const instruct of instructions) {
+            switch(instruct.type) {
+                case InstructionType.PUSH: {
+                    this.stack.push(instruct.operand);
+                    break;
+                }
+                case InstructionType.ADD: {
+                    const b = this.stack.pop();
+                    const a = this.stack.pop();
+                    this.stack.push(a + b);
+                    break;
+                }
+                case InstructionType.SUB: {
+                    const b = this.stack.pop();
+                    const a = this.stack.pop();
+                    this.stack.push(a + b);
+                    break;
+                }
+                case InstructionType.MUL: {
+                    const b = this.stack.pop();
+                    const a = this.stack.pop();
+                    this.stack.push(a * b);
+                    break;
+                }
+                case InstructionType.DIV: {
+                    const b = this.stack.pop();
+                    const a = this.stack.pop();
+                    if (b === 0) {
+                        throw new Error("Division by zero");
+                    }
+                    this.stack.push(Math.floor(a / b));
+                    break;
+                }
+                default: {
+                    throw new Error(`Unknown instruction type: ${instruct.type}`);
+                }
+            }
+        }
+        return this.stack.pop();
+    }
+}
 
 export class RustEvaluator extends BasicEvaluator {
-    private runCount: number = 0;
 
     constructor(plugin: IRunnerPlugin) {
         super(plugin);
     }
 
     async evaluateChunk(code: string): Promise<void> {
-        this.runCount++;
         try {
             const input = CharStream.fromString(code);
             const lexer = new RustLexer(input);
@@ -117,7 +149,11 @@ export class RustEvaluator extends BasicEvaluator {
             this.conductor.sendOutput(`Crate Result:\n${tree.toStringTree(parser)}`);
 
             const instructions = compiler.compile(parser, tree);
-            console.log(instructions);
+            debug(instructions);
+
+            const vm = new SimpleVirtualMachine();
+            const result = vm.execute(instructions);
+            this.conductor.sendOutput(`Result:\n${result}`);
         } catch (error) {
             if (error instanceof Error) {
                 this.conductor.sendOutput(`Error: ${error.message}`);
