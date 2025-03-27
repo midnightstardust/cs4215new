@@ -22,7 +22,11 @@ enum InstructionType {
     LOAD   = "LOAD",
     ASSIGN = "ASSIGN",
     LT     = "LT",
-    GT     = "GT", 
+    GT     = "GT",
+    EQ     = "EQ", 
+    NE     = "NE", 
+    LE     = "LE", 
+    GE     = "GE", 
 }
 
 interface Instruction {
@@ -64,10 +68,9 @@ class RustCompiler {
     }
 
     private isComparisonOperation(expr: ExpressionContext) {
-        return expr.getChildCount() === 3 && ["<", ">"].includes(expr.getChild(1).getText());
+        return expr.getChildCount() === 3 && ["<", ">", "==", "!=", "<=", ">="].includes(expr.getChild(1).getText());
     }
     
-
     private isBracketExpression(expr: ExpressionContext) {
         return expr.getChildCount() === 3 && expr.getChild(0).getText() === "(" && expr.getChild(2).getText() === ")";
     }
@@ -102,18 +105,16 @@ class RustCompiler {
 
             if (expr.getChildCount() === 1) {
                 this.visit(expr.getChild(0) as antlr.ParserRuleContext);
-            } else if(this.isBinaryArithmeticOperation(expr)) {
+            } else if (this.isBinaryArithmeticOperation(expr)) {
                 this.visit(expr.getChild(0) as antlr.ParserRuleContext);
                 this.visit(expr.getChild(2) as antlr.ParserRuleContext);
 
                 const op = expr.getChild(1).getText();
                 const instructType = this.binaryArithmeticTextToInstructionType[op];
                 this.instructions.push({ type: instructType });
-            } else if(this.isBracketExpression(expr)) {
+            } else if (this.isBracketExpression(expr)) {
                 this.visit(expr.getChild(1) as antlr.ParserRuleContext);
-            } 
-            else if (this.isComparisonOperation(expr)) {
-                // Evaluate left and right expressions.
+            } else if (this.isComparisonOperation(expr)) {
                 this.visit(expr.getChild(0) as antlr.ParserRuleContext);
                 this.visit(expr.getChild(2) as antlr.ParserRuleContext);
                 
@@ -123,13 +124,22 @@ class RustCompiler {
                     this.instructions.push({ type: InstructionType.LT });
                 } else if (op === ">") {
                     this.instructions.push({ type: InstructionType.GT });
+                } else if (op === "==") {
+                    this.instructions.push({ type: InstructionType.EQ });
+                } else if (op === "!=") {
+                    this.instructions.push({ type: InstructionType.NE });
+                } else if (op === "<=") {
+                    this.instructions.push({ type: InstructionType.LE });
+                } else if (op === ">=") {
+                    this.instructions.push({ type: InstructionType.GE });
                 }
-            }            
-            else if(this.isAssignmentExpression(expr)) {
+            } else if (this.isAssignmentExpression(expr)) {
                 this.visit(expr.getChild(2) as antlr.ParserRuleContext);
-                // first assume lhs of assgn is always identifier
+                // first assume lhs of assignment is always identifier
                 // have to add indexing into lists when we do list
-                const identifier = this.getNON_KEYWORD_IDENTIFIERFromPathExpression((expr.getChild(0) as ExpressionContext).getChild(0) as PathExpressionContext);
+                const identifier = this.getNON_KEYWORD_IDENTIFIERFromPathExpression(
+                    (expr.getChild(0) as ExpressionContext).getChild(0) as PathExpressionContext
+                );
                 if (identifier === null || identifier === undefined) {
                     throw new CompileError(this.UNABLETOEVAL(_expr));
                 }
@@ -144,11 +154,10 @@ class RustCompiler {
             }
         } else if (_expr.ruleIndex === RustParser.RULE_literalExpression) {
             const expr = _expr as LiteralExpressionContext;
-
             this.instructions.push({ type: InstructionType.PUSH, operand: parseInt(expr.INTEGER_LITERAL().toString())});
         } else if (_expr.ruleIndex === RustParser.RULE_statements) {
             const expr = _expr as StatementsContext;
-            for(const statement of expr.statement()) {
+            for (const statement of expr.statement()) {
                 this.visit(statement);
                 this.instructions.push({ type: InstructionType.POP });
             }
@@ -156,7 +165,7 @@ class RustCompiler {
         } else if (_expr.ruleIndex === RustParser.RULE_statement) {
             const expr = _expr as StatementContext;
             if (expr.SEMI()) {
-                this.instructions.push({ type: InstructionType.PUSH, operand: UNDEFINED })
+                this.instructions.push({ type: InstructionType.PUSH, operand: UNDEFINED });
             } else {
                 this.visit(expr.getChild(0) as antlr.ParserRuleContext);
             }
@@ -177,7 +186,7 @@ class RustCompiler {
                 this.envStack.pop();
                 this.instructions.push({ type: InstructionType.ENTER, operand: this.envStack.slice() });
             } else {
-                this.instructions.push({ type: InstructionType.PUSH, operand: UNDEFINED })
+                this.instructions.push({ type: InstructionType.PUSH, operand: UNDEFINED });
             }
         } else if (_expr.ruleIndex === RustParser.RULE_letStatement) {
             // we only support let a;
@@ -192,8 +201,8 @@ class RustCompiler {
             }
             this.envStack[this.envStack.length - 1].set(variableName, UNDEFINED);
             this.instructions.push({ type: InstructionType.PUSH, operand: UNDEFINED });
-        } else if(_expr.ruleIndex === RustParser.RULE_pathExpression) {
-            // a path expression is a repesentation of path (think namespace1 :: namespace2 :: variablename)
+        } else if (_expr.ruleIndex === RustParser.RULE_pathExpression) {
+            // a path expression is a representation of a path (think namespace1 :: namespace2 :: variablename)
             // we assume all path expressions are identifiers aka variable names
             const expr = _expr as PathExpressionContext;
             const identifier = this.getNON_KEYWORD_IDENTIFIERFromPathExpression(expr);
@@ -224,7 +233,7 @@ class SimpleVirtualMachine {
     private stack: any[];
 
     private loadFromEnv(name: string) : any {
-        for(let i = this.envs.length - 1; i >= 0; i--) {
+        for (let i = this.envs.length - 1; i >= 0; i--) {
             const v = this.envs[i].get(name);
             if (v === UNDEFINED) {
                 console.log(`VM WARNING: value is undefined`);
@@ -235,7 +244,7 @@ class SimpleVirtualMachine {
     }
 
     private assignToEnv(name: string, value: any) {
-        for(let i = this.envs.length - 1; i >= 0; i--) {
+        for (let i = this.envs.length - 1; i >= 0; i--) {
             if (this.envs[i].has(name)) {
                 this.envs[i].set(name, value);
                 return;
@@ -244,11 +253,11 @@ class SimpleVirtualMachine {
         throw new VMError(`${name} is not declared`);
     }
 
-    public execute(instructions: Instruction[]) : number {
+    public execute(instructions: Instruction[]) : any {
         this.stack = [];
         this.envs = [];
-        for(const instruct of instructions) {
-            switch(instruct.type) {
+        for (const instruct of instructions) {
+            switch (instruct.type) {
                 case InstructionType.PUSH: {
                     if (instruct.operand === null || instruct.operand === undefined) {
                         throw new VMError("PUSH missing operand");
@@ -262,18 +271,6 @@ class SimpleVirtualMachine {
                     this.stack.push(a + b);
                     break;
                 }
-                case InstructionType.LT: {
-                    const b = this.stack.pop();
-                    const a = this.stack.pop();
-                    this.stack.push(a < b);
-                    break;
-                }
-                case InstructionType.GT: {
-                    const b = this.stack.pop();
-                    const a = this.stack.pop();
-                    this.stack.push(a > b);
-                    break;
-                }                
                 case InstructionType.SUB: {
                     const b = this.stack.pop();
                     const a = this.stack.pop();
@@ -293,6 +290,42 @@ class SimpleVirtualMachine {
                         throw new VMError("Division by zero");
                     }
                     this.stack.push(Math.floor(a / b));
+                    break;
+                }
+                case InstructionType.LT: {
+                    const b = this.stack.pop();
+                    const a = this.stack.pop();
+                    this.stack.push(a < b);
+                    break;
+                }
+                case InstructionType.GT: {
+                    const b = this.stack.pop();
+                    const a = this.stack.pop();
+                    this.stack.push(a > b);
+                    break;
+                }
+                case InstructionType.EQ: {
+                    const b = this.stack.pop();
+                    const a = this.stack.pop();
+                    this.stack.push(a === b);
+                    break;
+                }
+                case InstructionType.NE: {
+                    const b = this.stack.pop();
+                    const a = this.stack.pop();
+                    this.stack.push(a !== b);
+                    break;
+                }
+                case InstructionType.LE: {
+                    const b = this.stack.pop();
+                    const a = this.stack.pop();
+                    this.stack.push(a <= b);
+                    break;
+                }
+                case InstructionType.GE: {
+                    const b = this.stack.pop();
+                    const a = this.stack.pop();
+                    this.stack.push(a >= b);
                     break;
                 }
                 case InstructionType.POP: {
@@ -353,7 +386,7 @@ export class RustEvaluator extends BasicEvaluator {
         } catch (error) {
             if (error instanceof CompileError) {
                 this.conductor.sendOutput(`Compile Error: ${error.message}`)
-            } else if(error instanceof VMError) {
+            } else if (error instanceof VMError) {
                 this.conductor.sendOutput(`VM execution Error: ${error.message}`)
             } else if (error instanceof Error) {
                 this.conductor.sendOutput(`Error: ${error.message}`);
