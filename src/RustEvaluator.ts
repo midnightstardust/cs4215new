@@ -26,7 +26,8 @@ enum InstructionType {
     EQ     = "EQ", 
     NE     = "NE", 
     LE     = "LE", 
-    GE     = "GE", 
+    GE     = "GE",
+    NOT    = "NOT", 
 }
 
 interface Instruction {
@@ -34,7 +35,7 @@ interface Instruction {
     operand?: any;
 }
 
-const debug = (...s: any[])  => {
+const debug = (...s: any[]) => {
     if (DEBUG) {
         console.log(...s);
     }
@@ -71,8 +72,14 @@ class RustCompiler {
         return expr.getChildCount() === 3 && ["<", ">", "==", "!=", "<=", ">="].includes(expr.getChild(1).getText());
     }
     
+    private isUnaryNotOperation(expr: ExpressionContext) {
+        return expr.getChildCount() === 2 && expr.getChild(0).getText() === "!";
+    }
+    
     private isBracketExpression(expr: ExpressionContext) {
-        return expr.getChildCount() === 3 && expr.getChild(0).getText() === "(" && expr.getChild(2).getText() === ")";
+        return expr.getChildCount() === 3 &&
+               expr.getChild(0).getText() === "(" &&
+               expr.getChild(2).getText() === ")";
     }
 
     private isAssignmentExpression(expr: ExpressionContext) {
@@ -102,8 +109,10 @@ class RustCompiler {
     private visit(_expr: antlr.ParserRuleContext): void {
         if (_expr.ruleIndex === RustParser.RULE_expression) {
             const expr = _expr as ExpressionContext;
-
-            if (expr.getChildCount() === 1) {
+            if (this.isUnaryNotOperation(expr)) {
+                this.visit(expr.getChild(1) as antlr.ParserRuleContext);
+                this.instructions.push({ type: InstructionType.NOT });
+            } else if (expr.getChildCount() === 1) {
                 this.visit(expr.getChild(0) as antlr.ParserRuleContext);
             } else if (this.isBinaryArithmeticOperation(expr)) {
                 this.visit(expr.getChild(0) as antlr.ParserRuleContext);
@@ -118,7 +127,6 @@ class RustCompiler {
                 this.visit(expr.getChild(0) as antlr.ParserRuleContext);
                 this.visit(expr.getChild(2) as antlr.ParserRuleContext);
                 
-                // Determine the operator.
                 const op = expr.getChild(1).getText();
                 if (op === "<") {
                     this.instructions.push({ type: InstructionType.LT });
@@ -135,8 +143,6 @@ class RustCompiler {
                 }
             } else if (this.isAssignmentExpression(expr)) {
                 this.visit(expr.getChild(2) as antlr.ParserRuleContext);
-                // first assume lhs of assignment is always identifier
-                // have to add indexing into lists when we do list
                 const identifier = this.getNON_KEYWORD_IDENTIFIERFromPathExpression(
                     (expr.getChild(0) as ExpressionContext).getChild(0) as PathExpressionContext
                 );
@@ -154,7 +160,13 @@ class RustCompiler {
             }
         } else if (_expr.ruleIndex === RustParser.RULE_literalExpression) {
             const expr = _expr as LiteralExpressionContext;
-            this.instructions.push({ type: InstructionType.PUSH, operand: parseInt(expr.INTEGER_LITERAL().toString())});
+            const text = expr.getText();
+            // If the literal is "true" or "false", push a boolean
+            if (text === "true" || text === "false") {
+                this.instructions.push({ type: InstructionType.PUSH, operand: text === "true" });
+            } else {
+                this.instructions.push({ type: InstructionType.PUSH, operand: parseInt(text) });
+            }
         } else if (_expr.ruleIndex === RustParser.RULE_statements) {
             const expr = _expr as StatementsContext;
             for (const statement of expr.statement()) {
@@ -189,8 +201,6 @@ class RustCompiler {
                 this.instructions.push({ type: InstructionType.PUSH, operand: UNDEFINED });
             }
         } else if (_expr.ruleIndex === RustParser.RULE_letStatement) {
-            // we only support let a;
-            // no initial assignment allowed;
             const expr = _expr as LetStatementContext;
             const variableName = expr.patternNoTopAlt().patternWithoutRange()?.identifierPattern()?.identifier()?.NON_KEYWORD_IDENTIFIER()?.getText();
             if (variableName === null || variableName === undefined) {
@@ -202,8 +212,6 @@ class RustCompiler {
             this.envStack[this.envStack.length - 1].set(variableName, UNDEFINED);
             this.instructions.push({ type: InstructionType.PUSH, operand: UNDEFINED });
         } else if (_expr.ruleIndex === RustParser.RULE_pathExpression) {
-            // a path expression is a representation of a path (think namespace1 :: namespace2 :: variablename)
-            // we assume all path expressions are identifiers aka variable names
             const expr = _expr as PathExpressionContext;
             const identifier = this.getNON_KEYWORD_IDENTIFIERFromPathExpression(expr);
             if (identifier === null || identifier === undefined) {
@@ -232,7 +240,7 @@ class SimpleVirtualMachine {
     private envs: Map<string, any>[];
     private stack: any[];
 
-    private loadFromEnv(name: string) : any {
+    private loadFromEnv(name: string): any {
         for (let i = this.envs.length - 1; i >= 0; i--) {
             const v = this.envs[i].get(name);
             if (v === UNDEFINED) {
@@ -253,7 +261,7 @@ class SimpleVirtualMachine {
         throw new VMError(`${name} is not declared`);
     }
 
-    public execute(instructions: Instruction[]) : any {
+    public execute(instructions: Instruction[]): any {
         this.stack = [];
         this.envs = [];
         for (const instruct of instructions) {
@@ -328,6 +336,11 @@ class SimpleVirtualMachine {
                     this.stack.push(a >= b);
                     break;
                 }
+                case InstructionType.NOT: {
+                    const a = this.stack.pop();
+                    this.stack.push(!a);
+                    break;
+                }
                 case InstructionType.POP: {
                     if (this.stack.length === 0) {
                         throw new VMError("stack is empty");
@@ -385,9 +398,9 @@ export class RustEvaluator extends BasicEvaluator {
             this.conductor.sendOutput(`Result:\n${result}`);
         } catch (error) {
             if (error instanceof CompileError) {
-                this.conductor.sendOutput(`Compile Error: ${error.message}`)
+                this.conductor.sendOutput(`Compile Error: ${error.message}`);
             } else if (error instanceof VMError) {
-                this.conductor.sendOutput(`VM execution Error: ${error.message}`)
+                this.conductor.sendOutput(`VM execution Error: ${error.message}`);
             } else if (error instanceof Error) {
                 this.conductor.sendOutput(`Error: ${error.message}`);
             } else {
