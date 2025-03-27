@@ -21,6 +21,8 @@ enum InstructionType {
     ENTER  = "ENTER",
     LOAD   = "LOAD",
     ASSIGN = "ASSIGN",
+    LT     = "LT",
+    GT     = "GT", 
 }
 
 interface Instruction {
@@ -60,6 +62,11 @@ class RustCompiler {
     private isBinaryArithmeticOperation(expr: ExpressionContext) {
         return expr.getChildCount() === 3 && ["+", "-", "*", "/"].includes(expr.getChild(1).getText());
     }
+
+    private isComparisonOperation(expr: ExpressionContext) {
+        return expr.getChildCount() === 3 && ["<", ">"].includes(expr.getChild(1).getText());
+    }
+    
 
     private isBracketExpression(expr: ExpressionContext) {
         return expr.getChildCount() === 3 && expr.getChild(0).getText() === "(" && expr.getChild(2).getText() === ")";
@@ -104,7 +111,21 @@ class RustCompiler {
                 this.instructions.push({ type: instructType });
             } else if(this.isBracketExpression(expr)) {
                 this.visit(expr.getChild(1) as antlr.ParserRuleContext);
-            } else if(this.isAssignmentExpression(expr)) {
+            } 
+            else if (this.isComparisonOperation(expr)) {
+                // Evaluate left and right expressions.
+                this.visit(expr.getChild(0) as antlr.ParserRuleContext);
+                this.visit(expr.getChild(2) as antlr.ParserRuleContext);
+                
+                // Determine the operator.
+                const op = expr.getChild(1).getText();
+                if (op === "<") {
+                    this.instructions.push({ type: InstructionType.LT });
+                } else if (op === ">") {
+                    this.instructions.push({ type: InstructionType.GT });
+                }
+            }            
+            else if(this.isAssignmentExpression(expr)) {
                 this.visit(expr.getChild(2) as antlr.ParserRuleContext);
                 // first assume lhs of assgn is always identifier
                 // have to add indexing into lists when we do list
@@ -241,6 +262,18 @@ class SimpleVirtualMachine {
                     this.stack.push(a + b);
                     break;
                 }
+                case InstructionType.LT: {
+                    const b = this.stack.pop();
+                    const a = this.stack.pop();
+                    this.stack.push(a < b);
+                    break;
+                }
+                case InstructionType.GT: {
+                    const b = this.stack.pop();
+                    const a = this.stack.pop();
+                    this.stack.push(a > b);
+                    break;
+                }                
                 case InstructionType.SUB: {
                     const b = this.stack.pop();
                     const a = this.stack.pop();
