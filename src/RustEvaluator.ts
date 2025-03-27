@@ -85,10 +85,6 @@ class RustCompiler {
     return expr.getChildCount() === 3 && expr.getChild(1).getText() === "=";
   }
 
-  private isIfExpression(expr: antlr.ParserRuleContext): boolean {
-    return expr.getChildCount() >= 3 && expr.getChild(0).getText() === "if";
-  }
-
   private inEnv(sym: string): boolean {
     return this.envStack.some((map) => map.has(sym));
   }
@@ -110,16 +106,16 @@ class RustCompiler {
   }
 
   private visit(_expr: antlr.ParserRuleContext): void {
-    if (this.isIfExpression(_expr)) {
-      this.visit(_expr.getChild(1));
+    if (_expr.ruleIndex === RustParser.RULE_ifExpression) {
+      this.visit(_expr.getChild(1)); 
       const jzIndex = this.instructions.length;
       this.instructions.push({ type: InstructionType.JZ, operand: null });
-      this.visit(_expr.getChild(2));
+      this.visit(_expr.getChild(2)); 
       if (_expr.getChildCount() > 3 && _expr.getChild(3).getText() === "else") {
         const jmpIndex = this.instructions.length;
         this.instructions.push({ type: InstructionType.JMP, operand: null });
         this.instructions[jzIndex].operand = this.instructions.length;
-        this.visit(_expr.getChild(4));
+        this.visit(_expr.getChild(4)); 
         this.instructions[jmpIndex].operand = this.instructions.length;
       } else {
         this.instructions[jzIndex].operand = this.instructions.length;
