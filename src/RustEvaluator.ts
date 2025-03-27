@@ -5,16 +5,17 @@ import { BasicEvaluator } from "conductor/dist/conductor/runner";
 import { IRunnerPlugin } from "conductor/dist/conductor/runner/types";
 import { CharStream, CommonTokenStream } from "antlr4ng";
 import { RustLexer } from "./parser/src/RustLexer";
-import { CrateContext, ExpressionContext, LiteralExpressionContext, RustParser } from "./parser/src/RustParser";
+import { CrateContext, ExpressionContext, ExpressionStatementContext, LiteralExpressionContext, RustParser, StatementContext, StatementsContext } from "./parser/src/RustParser";
 
 const DEBUG = true;
 
 enum InstructionType {
     PUSH = "PUSH",
-    ADD = "ADD",
-    SUB = "SUB",
-    MUL = "MUL",
-    DIV = "DIV"
+    ADD  = "ADD",
+    SUB  = "SUB",
+    MUL  = "MUL",
+    DIV  = "DIV",
+    POP  = "POP"
 }
 
 interface Instruction {
@@ -47,10 +48,11 @@ class RustCompiler {
     }
 
     private visit(_expr: antlr.ParserRuleContext): void {
+        debug(_expr.toStringTree(this.parser));
         if (_expr.ruleIndex === RustParser.RULE_expression) {
             const expr = _expr as ExpressionContext;
 
-            if (expr.getChildCount() == 1) {
+            if (expr.getChildCount() === 1) {
                 this.visit(expr.getChild(0) as antlr.ParserRuleContext);
             } else if(this.isBinaryArithmeticOperation(expr)) {
                 this.visit(expr.getChild(0) as antlr.ParserRuleContext);
@@ -70,7 +72,19 @@ class RustCompiler {
 
             debug(`${_expr.toStringTree(this.parser)} is a literal expression; compile to PUSH ${expr.INTEGER_LITERAL().toString()}`);
             this.instructions.push({ type: InstructionType.PUSH, operand: parseInt(expr.INTEGER_LITERAL().toString())});
-
+        } else if (_expr.ruleIndex === RustParser.RULE_statements) {
+            const expr = _expr as StatementsContext;
+            for(const statement of expr.statement()) {
+                this.visit(statement);
+                this.instructions.push({ type: InstructionType.POP });
+            }
+            this.instructions.pop();
+        } else if (_expr.ruleIndex === RustParser.RULE_statement) {
+            const expr = _expr as StatementContext;
+            this.visit(expr.getChild(0) as antlr.ParserRuleContext);
+        } else if (_expr.ruleIndex === RustParser.RULE_expressionStatement) {
+            const expr = _expr as ExpressionStatementContext;
+            this.visit(expr.getChild(0) as antlr.ParserRuleContext);
         } else {
             throw new Error(`Unable to evaluate: ${_expr.toStringTree(this.parser)}`);
         }
@@ -79,8 +93,7 @@ class RustCompiler {
     public compile(parser: RustParser, crate: CrateContext): Instruction[] {
         this.instructions = [];
         this.parser = parser;
-        // assume main's body only has one statement first (must end in a ;)
-        this.visit(crate.item(0).visItem().function_().blockExpression().statements().statement(0).expressionStatement().expression());
+        this.visit(crate.item(0).visItem().function_().blockExpression().statements());
         return this.instructions;
     }
 }
@@ -122,6 +135,13 @@ class SimpleVirtualMachine {
                     this.stack.push(Math.floor(a / b));
                     break;
                 }
+                case InstructionType.POP: {
+                    if (this.stack.length === 0) {
+                        throw new Error("Stack is empty");
+                    }
+                    this.stack.pop();
+                    break;
+                }
                 default: {
                     throw new Error(`Unknown instruction type: ${instruct.type}`);
                 }
@@ -147,6 +167,8 @@ export class RustEvaluator extends BasicEvaluator {
 
             const tree = parser.crate();
             this.conductor.sendOutput(`Crate Result:\n${tree.toStringTree(parser)}`);
+
+            this.conductor.sendOutput(`\n\n${tree.item(0).visItem().function_().blockExpression().statements().toStringTree(parser)}`)
 
             const instructions = compiler.compile(parser, tree);
             debug(instructions);
