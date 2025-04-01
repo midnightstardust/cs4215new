@@ -5,7 +5,7 @@ import { BasicEvaluator } from "conductor/dist/conductor/runner";
 import { IRunnerPlugin } from "conductor/dist/conductor/runner/types";
 import { CharStream, CommonTokenStream } from "antlr4ng";
 import { RustLexer } from "./parser/src/RustLexer";
-import { BlockExpressionContext, CrateContext, ExpressionContext, ExpressionStatementContext, ExpressionWithBlockContext, IdentifierContext, LetStatementContext, LiteralExpressionContext, PathExpressionContext, RustParser, StatementContext, StatementsContext } from "./parser/src/RustParser";
+import { BlockExpressionContext, CrateContext, ExpressionContext, ExpressionStatementContext, ExpressionWithBlockContext, Function_Context, IdentifierContext, ItemContext, LetStatementContext, LiteralExpressionContext, PathExpressionContext, PatternNoTopAltContext, RustParser, StatementContext, StatementsContext } from "./parser/src/RustParser";
 
 const DEBUG = true;
 const UNDEFINED = "undefined";
@@ -18,6 +18,7 @@ enum InstructionType {
   DIV = "DIV",
   POP = "POP",
   ENTER = "ENTER",
+  EXIT = "EXIT",
   LOAD = "LOAD",
   ASSIGN = "ASSIGN",
   LT = "LT",
@@ -29,11 +30,17 @@ enum InstructionType {
   NOT = "NOT",
   JMP = "JMP",
   JZ = "JZ",
+  RETURN = "RETURN",
+  CALL = "CALL",
+  DONE = "DONE",
 }
 
 interface Instruction {
   type: InstructionType;
   operand?: any;
+}
+
+interface Fn_Object { params: string[]; pc: number;
 }
 
 const debug = (...s: any[]) => {
@@ -91,6 +98,10 @@ class RustCompiler {
 
   private getNON_KEYWORD_IDENTIFIERFromPathExpression(expr: PathExpressionContext | null): antlr.TerminalNode | null {
     return expr?.pathInExpression()?.pathExprSegment(0)?.pathIdentSegment()?.identifier()?.NON_KEYWORD_IDENTIFIER();
+  }
+
+  private getNON_KEYWORD_IDENTIFIERFromPatternNoTopAlt(expr: PatternNoTopAltContext | null): antlr.TerminalNode | null {
+    return expr?.patternWithoutRange()?.identifierPattern()?.identifier()?.NON_KEYWORD_IDENTIFIER();
   }
 
   private NOTDECLARED(name: string): string {
@@ -203,16 +214,20 @@ class RustCompiler {
       if (statements) {
         const newEnv = new Map<string, any>();
         this.envStack.push(newEnv);
-        this.instructions.push({ type: InstructionType.ENTER, operand: this.envStack.slice() });
+        this.instructions.push({ type: InstructionType.ENTER, operand: newEnv });
         this.visit(statements);
         this.envStack.pop();
-        this.instructions.push({ type: InstructionType.ENTER, operand: this.envStack.slice() });
+        this.instructions.push({ type: InstructionType.EXIT })
       } else {
         this.instructions.push({ type: InstructionType.PUSH, operand: UNDEFINED });
       }
     } else if (_expr.ruleIndex === RustParser.RULE_letStatement) {
       const expr = _expr as LetStatementContext;
-      const variableName = expr.patternNoTopAlt().patternWithoutRange()?.identifierPattern()?.identifier()?.NON_KEYWORD_IDENTIFIER()?.getText();
+      const variableNameIdentifier = this.getNON_KEYWORD_IDENTIFIERFromPatternNoTopAlt(expr.patternNoTopAlt());
+      if (!variableNameIdentifier) {
+        throw new CompileError(this.UNABLETOEVAL(_expr));
+      }
+      const variableName = variableNameIdentifier.getText();
       if (variableName === null || variableName === undefined) {
         throw new CompileError(this.UNABLETOEVAL(_expr));
       }
@@ -232,16 +247,80 @@ class RustCompiler {
         throw new CompileError(this.NOTDECLARED(variableName));
       }
       this.instructions.push({ type: InstructionType.LOAD, operand: variableName });
+    } else if(_expr.ruleIndex === RustParser.RULE_crate) {
+      const expr = _expr as CrateContext;
+      for(const item of expr.item()) {
+        this.visit(item);
+        // remove the 'push UNDEFINED' at the end of function declarations
+        this.instructions.pop();
+      }
+    } else if(_expr.ruleIndex === RustParser.RULE_item) {
+      const expr = _expr as ItemContext;
+
+      // assume all items are functions
+      const fn_expr = expr.visItem()?.function_();
+      if (!fn_expr) {
+        throw new CompileError(this.UNABLETOEVAL(_expr));
+      }
+      this.visit(fn_expr);
+
+    }else if (_expr.ruleIndex === RustParser.RULE_function_) {
+      const expr = _expr as Function_Context;
+
+      const jmpInstruct = { type: InstructionType.JMP, operand: -1 };
+      this.instructions.push(jmpInstruct);
+
+      const functionIdentifier = expr.identifier().NON_KEYWORD_IDENTIFIER();
+      if (!functionIdentifier) {
+        throw new CompileError(this.UNABLETOEVAL(_expr));
+      }
+      const functionName = functionIdentifier.getText();
+      if (this.envStack[this.envStack.length - 1].has(functionName)) {
+        throw new CompileError(this.DUPLIDENTIFIER(functionName));
+      }
+
+      let params = expr.functionParameters()?.functionParam()?.map(param => {
+        const param_identifier = this.getNON_KEYWORD_IDENTIFIERFromPatternNoTopAlt(param.functionParamPattern()?.pattern()?.patternNoTopAlt(0));
+        if (!param_identifier) {
+          throw new CompileError(this.UNABLETOEVAL(_expr));
+        }
+        return param_identifier.getText();
+      })
+      if (!params) {
+        params = [];
+      }
+      const fnObj : Fn_Object = {params: params, pc: this.instructions.length };
+      this.envStack[this.envStack.length - 1].set(functionName, fnObj);
+
+      const prevEnvStack = this.envStack.slice();
+      const blockExpression = expr.blockExpression();
+      if (!blockExpression) {
+        throw new CompileError(this.UNABLETOEVAL(_expr));
+      }
+      const new_env = new Map<string, any>();
+      for(const param of params) {
+        new_env.set(param, UNDEFINED);
+      }
+      this.envStack.push(new_env);
+      this.visit(blockExpression);
+      this.instructions.push({ type: InstructionType.RETURN });
+      this.envStack = prevEnvStack;
+
+      jmpInstruct.operand = this.instructions.length;
+      this.instructions.push({ type: InstructionType.PUSH, operand: UNDEFINED });
     } else {
       throw new CompileError(this.UNABLETOEVAL(_expr));
     }
   }
 
   public compile(parser: RustParser, crate: CrateContext): Instruction[] {
-    this.instructions = [];
     this.parser = parser;
-    this.envStack = [];
-    this.visit(crate.item(0).visItem().function_().blockExpression());
+    this.envStack = [new Map<string, any>()];
+    this.instructions = [{ type: InstructionType.ENTER, operand: this.envStack[0] }];
+    this.visit(crate);
+    this.instructions.push({ type: InstructionType.PUSH, operand: this.envStack[0].get('main') });
+    this.instructions.push({ type: InstructionType.CALL, operand: 0});
+    this.instructions.push({ type: InstructionType.DONE });
     return this.instructions;
   }
 }
@@ -376,7 +455,11 @@ class SimpleVirtualMachine {
           if (instruct.operand === null || instruct.operand === undefined) {
             throw new VMError("ENTER missing operand");
           }
-          this.envs = instruct.operand;
+          this.envs.push(instruct.operand);
+          break;
+        }
+        case InstructionType.EXIT: {
+          this.envs.pop();
           break;
         }
         case InstructionType.LOAD: {
