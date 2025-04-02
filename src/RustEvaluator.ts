@@ -137,18 +137,19 @@ class RustCompiler {
 
   private visit(_expr: antlr.ParserRuleContext): void {
     if (_expr.ruleIndex === RustParser.RULE_ifExpression) {
-      this.visit(_expr.getChild(1)); 
+      this.visit(_expr.getChild(1) as antlr.ParserRuleContext); 
       const jzIndex = this.instructions.length;
       this.instructions.push({ type: InstructionType.JZ, operand: null });
-      this.visit(_expr.getChild(2)); 
+      this.visit(_expr.getChild(2) as antlr.ParserRuleContext); 
       if (_expr.getChildCount() > 3 && _expr.getChild(3).getText() === "else") {
         const jmpIndex = this.instructions.length;
         this.instructions.push({ type: InstructionType.JMP, operand: null });
         this.instructions[jzIndex].operand = this.instructions.length;
-        this.visit(_expr.getChild(4)); 
+        this.visit(_expr.getChild(4) as antlr.ParserRuleContext); 
         this.instructions[jmpIndex].operand = this.instructions.length;
       } else {
-        this.instructions[jzIndex].operand = this.instructions.length;
+        throw new VMError("If statement missing else block");
+        //this.instructions[jzIndex].operand = this.instructions.length;
       }
     } else if (_expr.ruleIndex === RustParser.RULE_expression) {
       const expr = _expr as ExpressionContext;
