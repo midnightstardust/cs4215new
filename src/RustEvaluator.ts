@@ -215,6 +215,7 @@ class RustCompiler {
 
         if (expr.getChildCount() === 3) {
           // no call params
+          this.instructions.push({ type: InstructionType.PUSH, operand: fObj });
           this.instructions.push({ type: InstructionType.CALL, operand: 0});
         } else {
           const callParams = expr.getChild(2) as CallParamsContext;
@@ -317,8 +318,7 @@ class RustCompiler {
         throw new CompileError(this.UNABLETOEVAL(_expr));
       }
       this.visit(fn_expr);
-
-    }else if (_expr.ruleIndex === RustParser.RULE_function_) {
+    } else if (_expr.ruleIndex === RustParser.RULE_function_) {
       const expr = _expr as Function_Context;
 
       const jmpInstruct = { type: InstructionType.JMP, operand: -1 };
