@@ -5,7 +5,7 @@ import { BasicEvaluator } from "conductor/dist/conductor/runner";
 import { IRunnerPlugin } from "conductor/dist/conductor/runner/types";
 import { CharStream, CommonTokenStream } from "antlr4ng";
 import { RustLexer } from "./parser/src/RustLexer";
-import { BlockExpressionContext, CrateContext, ExpressionContext, ExpressionStatementContext, ExpressionWithBlockContext, IdentifierContext, LetStatementContext, LiteralExpressionContext, PathExpressionContext, RustParser, StatementContext, StatementsContext } from "./parser/src/RustParser";
+import { BlockExpressionContext, CallParamsContext, CrateContext, ExpressionContext, ExpressionStatementContext, ExpressionWithBlockContext, Function_Context, IdentifierContext, ItemContext, LetStatementContext, LiteralExpressionContext, PathExpressionContext, PatternNoTopAltContext, RustParser, StatementContext, StatementsContext } from "./parser/src/RustParser";
 
 const DEBUG = true;
 const UNDEFINED = "undefined";
@@ -18,6 +18,7 @@ enum InstructionType {
   DIV = "DIV",
   POP = "POP",
   ENTER = "ENTER",
+  EXIT = "EXIT",
   LOAD = "LOAD",
   ASSIGN = "ASSIGN",
   LT = "LT",
@@ -29,11 +30,19 @@ enum InstructionType {
   NOT = "NOT",
   JMP = "JMP",
   JZ = "JZ",
+  RETURN = "RETURN",
+  CALL = "CALL",
+  DONE = "DONE",
 }
 
 interface Instruction {
   type: InstructionType;
   operand?: any;
+}
+
+interface Fn_Object { 
+  params: string[]; 
+  PC: number;
 }
 
 const debug = (...s: any[]) => {
@@ -85,12 +94,33 @@ class RustCompiler {
     return expr.getChildCount() === 3 && expr.getChild(1).getText() === "=";
   }
 
+  private isFunctionCall(expr: ExpressionContext) {
+    return expr.getChildCount() >= 3 && expr.getChild(1).getText() === "(" && expr.getChild(expr.getChildCount() - 1).getText() === ")";
+  }
+
+  private isReturnExpr(expr: ExpressionContext) {
+    return expr.getChildCount() >= 1 && expr.getChild(0).getText() === "return";
+  }
+
   private inEnv(sym: string): boolean {
     return this.envStack.some((map) => map.has(sym));
   }
 
+  private getFromEnv(sym: string): any | null {
+    for(let i = this.envStack.length - 1; i >= 0; --i) {
+      if (this.envStack[i].has(sym)) {
+        return this.envStack[i].get(sym);
+      }
+    }
+    return null;
+  }
+
   private getNON_KEYWORD_IDENTIFIERFromPathExpression(expr: PathExpressionContext | null): antlr.TerminalNode | null {
     return expr?.pathInExpression()?.pathExprSegment(0)?.pathIdentSegment()?.identifier()?.NON_KEYWORD_IDENTIFIER();
+  }
+
+  private getNON_KEYWORD_IDENTIFIERFromPatternNoTopAlt(expr: PatternNoTopAltContext | null): antlr.TerminalNode | null {
+    return expr?.patternWithoutRange()?.identifierPattern()?.identifier()?.NON_KEYWORD_IDENTIFIER();
   }
 
   private NOTDECLARED(name: string): string {
@@ -166,6 +196,42 @@ class RustCompiler {
         }
         this.instructions.push({ type: InstructionType.ASSIGN, operand: variableName });
         this.instructions.push({ type: InstructionType.PUSH, operand: UNDEFINED });
+      } else if (this.isFunctionCall(expr)) {
+        const functionIdentifier = this.getNON_KEYWORD_IDENTIFIERFromPathExpression(
+          (expr.getChild(0) as ExpressionContext).getChild(0) as PathExpressionContext
+        );
+        if (functionIdentifier === null || functionIdentifier === undefined) {
+          throw new CompileError(this.UNABLETOEVAL(_expr));
+        }
+        const functionName = functionIdentifier.getText();
+        if (functionName === null || functionName === undefined) {
+          throw new CompileError(this.UNABLETOEVAL(_expr));
+        }
+
+        const fObj = this.getFromEnv(functionName);
+        if (fObj === null || fObj === undefined) {
+          throw new CompileError(this.NOTDECLARED(fObj));
+        }
+
+        if (expr.getChildCount() === 3) {
+          // no call params
+          this.instructions.push({ type: InstructionType.PUSH, operand: fObj });
+          this.instructions.push({ type: InstructionType.CALL, operand: 0});
+        } else {
+          const callParams = expr.getChild(2) as CallParamsContext;
+          for(const param of callParams.expression()) {
+            this.visit(param);
+          }
+          this.instructions.push({ type: InstructionType.PUSH, operand: fObj });
+          this.instructions.push({ type: InstructionType.CALL, operand: callParams.expression().length });
+        }
+      } else if(this.isReturnExpr(expr)) {
+        if (expr.getChildCount() === 2) {
+          this.visit(expr.getChild(1) as antlr.ParserRuleContext);
+        } else {
+          this.instructions.push({ type: InstructionType.PUSH, operand: UNDEFINED });
+        }
+        this.instructions.push({ type: InstructionType.RETURN });
       } else {
         throw new CompileError(this.UNABLETOEVAL(_expr));
       }
@@ -203,16 +269,20 @@ class RustCompiler {
       if (statements) {
         const newEnv = new Map<string, any>();
         this.envStack.push(newEnv);
-        this.instructions.push({ type: InstructionType.ENTER, operand: this.envStack.slice() });
+        this.instructions.push({ type: InstructionType.ENTER, operand: newEnv });
         this.visit(statements);
         this.envStack.pop();
-        this.instructions.push({ type: InstructionType.ENTER, operand: this.envStack.slice() });
+        this.instructions.push({ type: InstructionType.EXIT })
       } else {
         this.instructions.push({ type: InstructionType.PUSH, operand: UNDEFINED });
       }
     } else if (_expr.ruleIndex === RustParser.RULE_letStatement) {
       const expr = _expr as LetStatementContext;
-      const variableName = expr.patternNoTopAlt().patternWithoutRange()?.identifierPattern()?.identifier()?.NON_KEYWORD_IDENTIFIER()?.getText();
+      const variableNameIdentifier = this.getNON_KEYWORD_IDENTIFIERFromPatternNoTopAlt(expr.patternNoTopAlt());
+      if (variableNameIdentifier === null || variableNameIdentifier === undefined) {
+        throw new CompileError(this.UNABLETOEVAL(_expr));
+      }
+      const variableName = variableNameIdentifier.getText();
       if (variableName === null || variableName === undefined) {
         throw new CompileError(this.UNABLETOEVAL(_expr));
       }
@@ -232,31 +302,103 @@ class RustCompiler {
         throw new CompileError(this.NOTDECLARED(variableName));
       }
       this.instructions.push({ type: InstructionType.LOAD, operand: variableName });
+    } else if(_expr.ruleIndex === RustParser.RULE_crate) {
+      const expr = _expr as CrateContext;
+      for(const item of expr.item()) {
+        this.visit(item);
+        // remove the 'push UNDEFINED' at the end of function declarations
+        this.instructions.pop();
+      }
+    } else if(_expr.ruleIndex === RustParser.RULE_item) {
+      const expr = _expr as ItemContext;
+
+      // assume all items are functions
+      const fn_expr = expr.visItem()?.function_();
+      if (fn_expr === null || fn_expr === undefined) {
+        throw new CompileError(this.UNABLETOEVAL(_expr));
+      }
+      this.visit(fn_expr);
+    } else if (_expr.ruleIndex === RustParser.RULE_function_) {
+      const expr = _expr as Function_Context;
+
+      const jmpInstruct = { type: InstructionType.JMP, operand: -1 };
+      this.instructions.push(jmpInstruct);
+
+      const functionIdentifier = expr.identifier().NON_KEYWORD_IDENTIFIER();
+      if (functionIdentifier === null || functionIdentifier === undefined) {
+        throw new CompileError(this.UNABLETOEVAL(_expr));
+      }
+      const functionName = functionIdentifier.getText();
+      if (this.envStack[this.envStack.length - 1].has(functionName)) {
+        throw new CompileError(this.DUPLIDENTIFIER(functionName));
+      }
+
+      let params = expr.functionParameters()?.functionParam()?.map(param => {
+        const param_identifier = this.getNON_KEYWORD_IDENTIFIERFromPatternNoTopAlt(param.functionParamPattern()?.pattern()?.patternNoTopAlt(0));
+        if (param_identifier === undefined || param_identifier === undefined) {
+          throw new CompileError(this.UNABLETOEVAL(_expr));
+        }
+        return param_identifier.getText();
+      })
+      if (params === null || params === undefined) {
+        params = [];
+      }
+      const fnObj : Fn_Object = {params: params, PC: this.instructions.length };
+      this.envStack[this.envStack.length - 1].set(functionName, fnObj);
+
+      const prevEnvStack = this.envStack.slice();
+      const blockExpression = expr.blockExpression();
+      if (blockExpression === null || blockExpression === undefined) {
+        throw new CompileError(this.UNABLETOEVAL(_expr));
+      }
+      const new_env = new Map<string, any>();
+      for(const param of params) {
+        new_env.set(param, UNDEFINED);
+      }
+      this.envStack.push(new_env);
+      this.visit(blockExpression);
+      this.instructions.push({ type: InstructionType.RETURN });
+      this.envStack = prevEnvStack;
+
+      jmpInstruct.operand = this.instructions.length;
+      this.instructions.push({ type: InstructionType.PUSH, operand: UNDEFINED });
     } else {
       throw new CompileError(this.UNABLETOEVAL(_expr));
     }
   }
 
   public compile(parser: RustParser, crate: CrateContext): Instruction[] {
-    this.instructions = [];
     this.parser = parser;
-    this.envStack = [];
-    this.visit(crate.item(0).visItem().function_().blockExpression());
+    this.envStack = [new Map<string, any>()];
+    this.instructions = [{ type: InstructionType.ENTER, operand: this.envStack[0] }];
+    this.visit(crate);
+    this.instructions.push({ type: InstructionType.PUSH, operand: this.envStack[0].get('main') });
+    this.instructions.push({ type: InstructionType.CALL, operand: 0});
+    this.instructions.push({ type: InstructionType.DONE });
     return this.instructions;
   }
+}
+
+interface RuntimeFrame {
+  nextPC: number;
+  env: Map<string, any>[];
 }
 
 class SimpleVirtualMachine {
   private envs: Map<string, any>[];
   private stack: any[];
+  private runtimeStack: RuntimeFrame[];
+  private PC: number;
 
   private loadFromEnv(name: string): any {
     for (let i = this.envs.length - 1; i >= 0; i--) {
-      const v = this.envs[i].get(name);
-      if (v === UNDEFINED) {
-        console.log(`VM WARNING: value is undefined`);
+      if (this.envs[i].has(name)) {
+        const v = this.envs[i].get(name);
+        if (v === UNDEFINED) {
+          console.log(`VM WARNING: value is undefined`);
+        }
+        return v;
       }
-      return v;
     }
     throw new VMError(`${name} is not declared`);
   }
@@ -274,9 +416,13 @@ class SimpleVirtualMachine {
   public execute(instructions: Instruction[]): any {
     this.stack = [];
     this.envs = [];
-    let ip = 0;
-    while (ip < instructions.length) {
-      const instruct = instructions[ip];
+    this.PC = 0;
+    this.runtimeStack = [];
+    while (this.PC < instructions.length) {
+      const instruct = instructions[this.PC];
+      debug('\n');
+      debug(instruct);
+      debug(this.stack, this.envs, this.runtimeStack);
       switch (instruct.type) {
         case InstructionType.PUSH: {
           if (instruct.operand === null || instruct.operand === undefined) {
@@ -354,13 +500,13 @@ class SimpleVirtualMachine {
           break;
         }
         case InstructionType.JMP: {
-          ip = instruct.operand;
+          this.PC = instruct.operand;
           continue;
         }
         case InstructionType.JZ: {
           const cond = this.stack.pop();
           if (!cond) {
-            ip = instruct.operand;
+            this.PC = instruct.operand;
             continue;
           }
           break;
@@ -376,7 +522,11 @@ class SimpleVirtualMachine {
           if (instruct.operand === null || instruct.operand === undefined) {
             throw new VMError("ENTER missing operand");
           }
-          this.envs = instruct.operand;
+          this.envs.push(instruct.operand);
+          break;
+        }
+        case InstructionType.EXIT: {
+          this.envs.pop();
           break;
         }
         case InstructionType.LOAD: {
@@ -388,11 +538,33 @@ class SimpleVirtualMachine {
           this.assignToEnv(instruct.operand, v);
           break;
         }
+        case InstructionType.DONE: {
+          return this.stack.pop();
+        }
+        case InstructionType.RETURN: {
+          const runtimeStackFrame = this.runtimeStack.pop();
+          this.envs = runtimeStackFrame.env;
+          this.PC = runtimeStackFrame.nextPC;
+          continue;
+        }
+        case InstructionType.CALL: {
+          // the below implementation is not exactly correct, but should have the same side effects (output)
+          const numArgs: number = instruct.operand;
+          const functionObj: Fn_Object = this.stack.pop();
+          const newEnvFrame = new Map<string, any>();
+          for(let i = numArgs - 1; i >= 0; --i) {
+            newEnvFrame.set(functionObj.params[i], this.stack.pop());
+          }
+          this.runtimeStack.push({ nextPC: this.PC + 1, env: this.envs.slice() })
+          this.envs.push(newEnvFrame);
+          this.PC = functionObj.PC;
+          continue;
+        }
         default: {
           throw new VMError(`Unknown instruction type: ${instruct.type}`);
         }
       }
-      ip++;
+      this.PC++;
     }
     return this.stack.pop();
   }
@@ -418,6 +590,7 @@ export class RustEvaluator extends BasicEvaluator {
       const result = vm.execute(instructions);
       this.conductor.sendOutput(`Result:\n${result}`);
     } catch (error) {
+      debug(error);
       if (error instanceof CompileError) {
         this.conductor.sendOutput(`Compile Error: ${error.message}`);
       } else if (error instanceof VMError) {
