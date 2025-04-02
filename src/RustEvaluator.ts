@@ -151,7 +151,27 @@ class RustCompiler {
         throw new VMError("If statement missing else block");
         //this.instructions[jzIndex].operand = this.instructions.length;
       }
-    } else if (_expr.ruleIndex === RustParser.RULE_expression) {
+    } else if (_expr.ruleIndex === RustParser.RULE_loopExpression) {
+
+      const loopAlt = _expr.getChild(0);
+      if (loopAlt.getChildCount() >= 3 && loopAlt.getChild(0).getText() === "while") {
+        const predicate1 = loopAlt.getChild(1) as antlr.ParserRuleContext;
+        const block1 = loopAlt.getChild(2) as antlr.ParserRuleContext;
+        const begin = this.instructions.length;
+        this.visit(predicate1);
+        const jzIndex = this.instructions.length;
+        this.instructions.push({ type: InstructionType.JZ, operand: null });
+        this.visit(block1);
+        this.instructions.push({ type: InstructionType.JMP, operand: begin });
+        this.instructions[jzIndex].operand = this.instructions.length;
+        this.instructions.push({ type: InstructionType.PUSH, operand: UNDEFINED });
+      } else {
+        throw new CompileError("Only while loop allowed! Don't break our code please :(");
+      }
+
+    }
+  
+    else if (_expr.ruleIndex === RustParser.RULE_expression) {
       const expr = _expr as ExpressionContext;
       if (this.isUnaryNotOperation(expr)) {
         this.visit(expr.getChild(1) as antlr.ParserRuleContext);
