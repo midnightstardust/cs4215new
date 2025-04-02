@@ -4,6 +4,7 @@
         "moduleResolution": "bundler",
         "target": "es2023",
         "esModuleInterop": true,
+        "incremental": true,
         "sourceMap": true
     }
 }
