@@ -217,7 +217,7 @@ export class BorrowChecker extends AbstractParseTreeVisitor<boolean> implements 
   visitExpressionStatement(ctx: ExpressionStatementContext): boolean {
     const expr = ctx.expression();
     //this.debug_print(`expression: ${expr.getText()}`);
-    this.debug_print(`expr: ${expr.toStringTree(this.parser)}`);
+    // this.debug_print(`expr: ${expr.toStringTree(this.parser)}`);
     //this.debug_print(`child count: ${expr.getChildCount()}`);
     //for (let i = 0; i < expr.getChildCount(); i++) {
     //  const child = expr.getChild(i);
@@ -271,8 +271,10 @@ export class BorrowChecker extends AbstractParseTreeVisitor<boolean> implements 
     this.debug_print(`path: ${ctx.toStringTree(this.parser)}`);
     const variableName = ctx.getText();
     const variable = this.lookup(variableName);
-    if (variable !== null && !variable.hasOwnedValue()) {
-      throw new CheckerError(`access of moved value: ${variableName}`);
+    if (variable !== undefined) {
+      if (!variable.hasOwnedValue()) {
+        throw new CheckerError(`access of moved value: ${variableName}`);
+      }
     }
     if (variable !== null) {
       return true;
