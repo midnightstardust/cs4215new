@@ -3,6 +3,7 @@
         "module": "ESNext",
         "moduleResolution": "bundler",
         "target": "es2023",
+        "esModuleInterop": true,
         "sourceMap": true
     }
 }
