@@ -135,8 +135,55 @@ class RustCompiler {
     return `duplicate identifier: ${name}`;
   }
 
+  private inferType(expr: antlr.ParserRuleContext): string {
+    if (expr.getChildCount() === 0) {
+      const text = expr.getText();
+      if (text === "true" || text === "false") {
+        return "bool";
+      }
+      if (!isNaN(parseInt(text))) {
+        return "int";
+      }
+      throw new CompileError("Unable to infer type of expression (neither int or boolean): " + text);
+    }
+    if (expr.getChildCount() === 1) {
+      return this.inferType(expr.getChild(0) as antlr.ParserRuleContext);
+    }
+    if (expr.ruleIndex === RustParser.RULE_literalExpression) {
+      const text = expr.getText();
+      if (text === "true" || text === "false") {
+        return "bool";
+      }
+      return "int";
+    }
+    const expression = expr as ExpressionContext;
+    if (this.isComparisonOperation(expression)) {
+      return "bool";
+    }
+    if (this.isUnaryNotOperation(expression)) {
+      const subType = this.inferType(expression.getChild(1));
+      if (subType !== "bool") {
+        throw new CompileError("Type checker: Unary ! operator expects a boolean operand");
+      }
+      return "bool";
+    }
+    if (this.isBinaryArithmeticOperation(expression)) {
+      return "int";
+    }
+    if (this.isBracketExpression(expression)) {
+      return this.inferType(expression.getChild(1));
+    }
+    throw new CompileError("Unable to infer type of expression: " + expr.toStringTree(this.parser));
+  }
+  
+
   private visit(_expr: antlr.ParserRuleContext): void {
     if (_expr.ruleIndex === RustParser.RULE_ifExpression) {
+      const condExpr = _expr.getChild(1);
+      const condType = this.inferType(condExpr as antlr.ParserRuleContext);
+      if (condType !== "bool") {
+        throw new CompileError("Type checker: If condition must be a boolean");
+      }
       this.visit(_expr.getChild(1) as antlr.ParserRuleContext); 
       const jzIndex = this.instructions.length;
       this.instructions.push({ type: InstructionType.JZ, operand: null });
@@ -156,6 +203,10 @@ class RustCompiler {
       const loopAlt = _expr.getChild(0);
       if (loopAlt.getChildCount() >= 3 && loopAlt.getChild(0).getText() === "while") {
         const predicate1 = loopAlt.getChild(1) as antlr.ParserRuleContext;
+        const predType = this.inferType(predicate1);
+        if (predType !== "bool") {
+          throw new CompileError("Type checker: While condition must be a boolean");
+        }
         const block1 = loopAlt.getChild(2) as antlr.ParserRuleContext;
         const begin = this.instructions.length;
         this.visit(predicate1);
