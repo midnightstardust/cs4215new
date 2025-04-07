@@ -1,4 +1,5 @@
 const operandStackSize = 1024;
+const runtimeStackSize = 2048;
 
 export enum InstructionType {
   PUSH = "PUSH",
@@ -34,8 +35,17 @@ export const UNDEFINED = "undefined";
 class OperandStack {
   private stack: DataView;
   private sz: number;
-  private word_size = 4; // 4 bytes is a 32 bit int
   private num_words: number;
+
+  private readonly word_size = 4; // 4 bytes is a 32 bit int
+
+  private NO_SPACE(f: string) : string {
+    return `OperandStack ${f}: no space left in operand stack`;
+  }
+
+  private NO_ELEMENTS_IN_STACK(f: string) : string {
+    return `OperandStack ${f}: no elements in stack`;
+  }
 
   constructor(num_words : number) {
     const data = new ArrayBuffer(num_words * this.word_size);
@@ -46,14 +56,14 @@ class OperandStack {
 
   push(val: any) : void {
     if (this.sz === this.num_words) {
-      throw new VMError("OperandStack push: no space");
+      throw new VMError(this.NO_SPACE("push"));
     }
     this.stack.setInt32((this.sz++) * this.word_size, val);
   }
 
   pop(): any {
     if (this.sz === 0) {
-      throw new VMError("OperandStack pop: no elements in stack")
+      throw new VMError(this.NO_ELEMENTS_IN_STACK("pop"));
     }
     return this.stack.getInt32((--this.sz) * this.word_size);
   }
@@ -64,62 +74,91 @@ class OperandStack {
 
 }
 
-// TODO: make realistic
 class RuntimeStack {
-  private runtimeStack: Map<number, any>[];
-  private prevPC: number[];
-  private limit: number[];
-  private sz: number;
+  // a stack consists of prevPC, prevSizeOfFrame, followed by the vars
+  private num_words: number;
+  private runtimeStack: DataView;
 
-  private NO_SPACE(f: string) : string {
-    return `RuntimeStack: ${f} no frames`;
+  private baseAddress: number;
+  private sizeOfFrame: number;
+
+  private numOfFrames: number;
+
+  private readonly frameOffset = 2;
+  private readonly word_size = 4; // 4 bytes is a 32 bit int
+  private readonly prevPCOffset = 0;
+  private readonly prevSizeOfFrameOffset = 1;
+
+  private IDX_OUT_OF_FRAME(f: string): string {
+    return `RuntimeStack ${f}: index out of frame`;
   }
 
-  constructor() {
-    this.runtimeStack = [];
-    this.prevPC = [];
-    this.limit = [];
-    this.sz = 0;
+  private NO_SPACE(f: string): string {
+    return `RuntimeStack ${f}: no space in runtime stack`;
   }
 
-  set(idx: number, val: any): void {
-    if (this.sz === 0) {
-      throw new VMError(this.NO_SPACE("set"));
-    }
-    if (idx >= this.limit.at(-1)) {
-      throw new VMError("RuntimeStack: set exceed declared space");
-    }
-    this.runtimeStack.at(-1).set(idx, val);
+  private NO_FRAMES(f: string): string {
+    return `RuntimeStack ${f}: no frames`;
   }
 
-  get(idx: number): any {
-    if (this.sz === 0) {
-      throw new VMError(this.NO_SPACE("set"));
+  constructor(num_words: number) {
+    this.num_words = num_words;
+
+    const data = new ArrayBuffer(num_words * this.word_size);
+    this.runtimeStack = new DataView(data);
+
+    this.baseAddress = 0;
+    this.sizeOfFrame = 0;
+    this.numOfFrames = 0;
+  }
+
+  set(_idx: number, val: number): void {
+    const idx = _idx + this.frameOffset;
+    if (idx >= this.sizeOfFrame) {
+      throw new VMError(this.IDX_OUT_OF_FRAME("set"));
     }
-    if (idx >= this.limit.at(-1)) {
-      throw new VMError("RuntimeStack: get exceed declared space");
+
+    this.runtimeStack.setInt32((this.baseAddress + idx) * this.word_size, val);
+  }
+
+  get(_idx: number): number {
+    const idx = _idx + this.frameOffset;
+    if (idx >= this.sizeOfFrame) {
+      throw new VMError(this.IDX_OUT_OF_FRAME("get"));
     }
-    return this.runtimeStack.at(-1).get(idx);
+
+    return this.runtimeStack.getInt32((this.baseAddress + idx) * this.word_size);
   }
 
   call(prevPC: number, sz: number) : void {
-    this.prevPC.push(prevPC);
-    this.limit.push(sz);
-    this.runtimeStack.push(new Map<number, any>());
-    this.sz++;
+    const totalSz = sz + this.frameOffset + this.baseAddress + this.sizeOfFrame;
+    if (totalSz >= this.num_words) {
+      throw new VMError(this.NO_SPACE("call"));
+    }
+
+    this.runtimeStack.setUint32((this.baseAddress + this.sizeOfFrame + this.prevPCOffset) * this.word_size, prevPC);
+    this.runtimeStack.setUint32((this.baseAddress + this.sizeOfFrame + this.prevSizeOfFrameOffset) * this.word_size, this.sizeOfFrame);
+
+    this.baseAddress = this.baseAddress + this.sizeOfFrame;
+    this.sizeOfFrame = sz + this.frameOffset;
+    ++this.numOfFrames;
   }
 
   ret() : number {
-    if (this.sz === 0) {
-      throw new VMError(this.NO_SPACE("set"));
+    if (this.numOfFrames-- === 0) {
+      throw new VMError(this.NO_FRAMES("ret"));
     }
-    this.limit.pop();
-    this.runtimeStack.pop();
-    return this.prevPC.pop();
+    const prevPC = this.runtimeStack.getUint32((this.baseAddress + this.prevPCOffset) * this.word_size);
+    const prevSizeOfFrame = this.runtimeStack.getUint32((this.baseAddress + this.prevSizeOfFrameOffset) * this.word_size);
+
+    this.baseAddress = this.baseAddress - prevSizeOfFrame;
+    this.sizeOfFrame = prevSizeOfFrame;
+
+    return prevPC;
   }
 
-  print(): any {
-    return this.runtimeStack;
+  print() : number[] {
+    return Array.from({length: this.baseAddress + this.sizeOfFrame}, (_, i) => this.runtimeStack.getInt32(i * this.word_size));
   }
 }
 
@@ -150,8 +189,8 @@ export class RustVM {
 
   public run(instructions: Instruction[], debug: boolean) : any {
     this.debug = debug;
-    const runtimeStack = new RuntimeStack();
-    const operandStack = new OperandStack(4);
+    const runtimeStack = new RuntimeStack(runtimeStackSize);
+    const operandStack = new OperandStack(operandStackSize);
     let PC = 0, returnPC = 0;
 
     while(PC < instructions.length) {
