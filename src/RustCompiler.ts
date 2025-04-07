@@ -68,6 +68,12 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
   private variableNamespace: Namespace[];
   private debug: boolean;
 
+  private DEBUG(...v: any) : void {
+    if (this.debug) {
+      console.log(...v);
+    }
+  }
+
   private UNABLE_TO_EVAL_ERR(expr: antlr.ParserRuleContext): string {
     return `Unable to evaluate: ${expr.toStringTree(this.parser)}`;
   }
@@ -371,6 +377,9 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
     }
     this.instructions.push({ type: InstructionType.CALL, operand: mainPC });
     this.instructions.push({ type: InstructionType.DONE });
+
+    this.DEBUG(this.instructions);
+
     return this.instructions;
   }
 }
