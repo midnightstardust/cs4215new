@@ -1,3 +1,5 @@
+//fair use: refer to the readme.md at the root
+
 import * as antlr from "antlr4ng";
 
 import { AbstractParseTreeVisitor } from "antlr4ng";
@@ -10,6 +12,8 @@ export class CompileError extends Error {
     super(message);
   }
 }
+
+type ExpressionContext = antlr.ParserRuleContext;
 
 class Namespace {
   private stackOfFrames: Map<string, number>[];
@@ -95,9 +99,73 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
     return -1;
   }
 
+
+  private inferType(expr: antlr.ParserRuleContext): string {
+    if (expr.getChildCount() === 0) {
+      const text = expr.getText();
+      if (text === "true" || text === "false") {
+        return "bool";
+      }
+      if (!isNaN(parseInt(text))) {
+        return "int";
+      }
+      throw new CompileError("Unable to infer type of expression (neither int or boolean): " + text);
+    }
+    if (expr.getChildCount() === 1) {
+      return this.inferType(expr.getChild(0) as antlr.ParserRuleContext);
+    }
+    if (expr.ruleIndex === RustParser.RULE_literalExpression) {
+      const text = expr.getText();
+      if (text === "true" || text === "false") {
+        return "bool";
+      }
+      return "int";
+    }
+    const expression = expr as ExpressionContext;
+    if (this.isComparisonOperation(expression)) {
+      return "bool";
+    }
+    if (this.isUnaryNotOperation(expression)) {
+      const subType = this.inferType(expression.getChild(1));
+      if (subType !== "bool") {
+        throw new CompileError("Type checker: Unary ! operator expects a boolean operand");
+      }
+      return "bool";
+    }
+    if (this.isBinaryArithmeticOperation(expression)) {
+      return "int";
+    }
+    if (this.isBracketExpression(expression)) {
+      return this.inferType(expression.getChild(1));
+    }
+    throw new CompileError("Unable to infer type of expression: " + expr.toStringTree(this.parser));
+  }
+
+  private isComparisonOperation(expr: ExpressionContext): boolean {
+    return expr instanceof ComparisonExpressionContext;
+  }
+  private isUnaryNotOperation(expr: ExpressionContext): boolean {
+    return expr instanceof NegationExpressionContext && expr.NOT() !== null;
+  }
+  private isBinaryArithmeticOperation(expr: ExpressionContext): boolean {
+    return expr instanceof ArithmeticOrLogicalExpressionContext &&
+           (expr.PLUS() !== null || expr.MINUS() !== null ||
+            expr.STAR() !== null || expr.SLASH() !== null);
+  }
+  private isBracketExpression(expr: ExpressionContext): boolean {
+    const text = expr.getText();
+    return text.startsWith("(") && text.endsWith(")");
+  }
+  
+
   visitIfExpression(ctx: IfExpressionContext) {
     if (ctx.blockExpression().length !== 2) {
       throw new CompileError(this.UNABLE_TO_EVAL_ERR(ctx));
+    }
+
+    const condType = this.inferType(ctx.expression());
+    if (condType !== "bool") {
+        throw new CompileError("Type checker: If condition must be a boolean");
     }
 
     this.visit(ctx.expression());
@@ -124,6 +192,11 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
   visitPredicateLoopExpression(ctx: PredicateLoopExpressionContext) {
     const begin = this.instructions.length;
 
+    const condType = this.inferType(ctx.expression());
+    if (condType !== "bool") {
+      throw new CompileError("Type checker: While condition must be a boolean");
+    }
+
     this.visit(ctx.expression());
     const jzInstruct = { type: InstructionType.JZ, operand: -1 };
     this.instructions.push(jzInstruct);
@@ -142,6 +215,10 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
       this.visit(ctx.expression());
       this.instructions.push({ type: InstructionType.SUB });
     } else if (ctx.NOT() !== null) {
+        const subType = this.inferType(ctx.expression());
+        if (subType !== "bool") {
+            throw new CompileError("Type checker: Unary ! operator expects a boolean operand");
+        }
       this.visit(ctx.expression());
       this.instructions.push({ type: InstructionType.NOT });
     }
