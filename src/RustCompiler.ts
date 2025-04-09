@@ -7,6 +7,7 @@ import { RustParserVisitor } from "./parser/src/RustParserVisitor";
 import { ArithmeticOrLogicalExpressionContext, AssignmentExpressionContext, BlockExpressionContext, CallExpressionContext, CallParamsContext, ComparisonExpressionContext, ComparisonOperatorContext, CrateContext, Function_Context, IdentifierContext, IfExpressionContext, LetStatementContext, LiteralExpressionContext, LoopExpressionContext, NegationExpressionContext, PathExpressionContext, PredicateLoopExpressionContext, ReturnExpressionContext, RustParser, StatementContext, StatementsContext } from "./parser/src/RustParser";
 import { Instruction, InstructionType, UNDEFINED } from "./RustVM";
 
+
 export class CompileError extends Error {
   public constructor(message?: string) {
     super(message);
@@ -126,7 +127,9 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
       return "bool";
     }
     if (this.isUnaryNotOperation(expression)) {
-      const subType = this.inferType(expression.getChild(1));
+      const subType = this.inferType(
+            expression.getChild(1) as antlr.ParserRuleContext
+         );
       if (subType !== "bool") {
         throw new CompileError("Type checker: Unary ! operator expects a boolean operand");
       }
@@ -136,7 +139,9 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
       return "int";
     }
     if (this.isBracketExpression(expression)) {
-      return this.inferType(expression.getChild(1));
+          return this.inferType(
+            expression.getChild(1) as antlr.ParserRuleContext
+          );
     }
     throw new CompileError("Unable to infer type of expression: " + expr.toStringTree(this.parser));
   }
