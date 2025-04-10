@@ -17,9 +17,11 @@ class CheckerError extends Error {
 
 class Value {
   private _copyTrait: boolean;
+  private _dropped: boolean;
 
   public constructor(public type: string) {
     this._copyTrait = isCopyTraitType(type);
+    this._dropped = false;
   }
 
   public hasCopyTrait(): boolean {
@@ -28,6 +30,17 @@ class Value {
 
   public hasMoveTrait(): boolean {
     return !this._copyTrait;
+  }
+
+  public drop(): void {
+    if (this.hasCopyTrait()) {
+      return;
+    }
+    if (this._dropped) {
+      throw new CheckerError(`value of type ${this.type} has been dropped`);
+    }
+    this._dropped = true;
+    console.log(`value of type ${this.type} is dropped`);
   }
 }
 
@@ -58,16 +71,33 @@ class Variable {
     return this._value !== undefined;
   }
 
-  public moveOwnedValue(): Value {
+  public moveOwnedValue(newVar: Variable) {
     if (this._value === undefined) {
       if (this.assign_count === 0) {
         throw new CheckerError("variable has not been initialized");
       }
       throw new CheckerError("value has already been moved");
     }
-    const value = this._value;
+    newVar.assignValue(this._value);
+    if (this._value.hasMoveTrait()) {
+      this._value = undefined;
+    }
+  }
+
+  public tryDropOwnedValue(): void {
+    if (this._value === undefined) {
+      return;
+    }
+    this._value.drop();
     this._value = undefined;
-    return value;
+  }
+
+  public dropOwnedValue(): void {
+    if (this._value === undefined) {
+      throw new CheckerError("value has already been moved");
+    }
+    this._value.drop();
+    this._value = undefined;
   }
 
   public assignValue(value: Value): void {
@@ -170,7 +200,10 @@ export class BorrowChecker extends AbstractParseTreeVisitor<boolean> implements 
       this.debug_print_env();
     }
     this.visit(ctx.blockExpression());
-    this.envStack.pop();
+    const lastEnv = this.envStack.pop();
+    for (const [_, variable] of lastEnv) {
+      variable.tryDropOwnedValue();
+    }
     return true;
   }
 
@@ -201,7 +234,7 @@ export class BorrowChecker extends AbstractParseTreeVisitor<boolean> implements 
       const path = child_expr as PathExpressionContext;
       const source_variable = this.strict_lookup(path.getText());
       const variable = new Variable(variableName, mutable, type);
-      variable.assignValue(source_variable.moveOwnedValue());
+      source_variable.moveOwnedValue(variable);
       this.get_curr_env().set(variableName, variable);
     } else {
       this.visit(child_expr);
@@ -216,29 +249,24 @@ export class BorrowChecker extends AbstractParseTreeVisitor<boolean> implements 
 
   visitExpressionStatement(ctx: ExpressionStatementContext): boolean {
     const expr = ctx.expression();
-    //this.debug_print(`expression: ${expr.getText()}`);
-    // this.debug_print(`expr: ${expr.toStringTree(this.parser)}`);
-    //this.debug_print(`child count: ${expr.getChildCount()}`);
-    //for (let i = 0; i < expr.getChildCount(); i++) {
-    //  const child = expr.getChild(i);
-    //  this.debug_print(`child ${i}: ${child.toStringTree(this.parser)}`);
-    //}
     if (this.isAssignmentExpression(expr)) {
       const path_expr = expr.getChild(0) as PathExpressionContext;
       const variableName = path_expr.getText();
       const variable = this.strict_lookup(variableName);
-      const child_expr = (expr.getChild(2) as ExpressionContext).getChild(0) as antlr.ParserRuleContext;
+      const child_expr = (expr.getChild(2) as ExpressionContext).getChildCount() > 1
+                        ? (expr.getChild(2) as ExpressionContext)
+                        : (expr.getChild(2) as ExpressionContext).getChild(0) as antlr.ParserRuleContext;
       if (child_expr.ruleIndex === RustParser.RULE_pathExpression) {
         this.debug_print(`child_expr_path: ${child_expr.getText()}`);
         this.debug_print(`ctx: ${child_expr.toStringTree(this.parser)}`);
         const path = child_expr as PathExpressionContext;
         const source_variable = this.strict_lookup(path.getText());
-        variable.assignValue(source_variable.moveOwnedValue());
+        source_variable.moveOwnedValue(variable);
       } else {
         this.debug_print(`child_expr_else: ${child_expr.getText()}`);
         this.debug_print(`ctx: ${child_expr.toStringTree(this.parser)}`);
         this.visit(child_expr);
-        this.debug_print(`REACHED`);
+        variable.tryDropOwnedValue();
         variable.assignValue(new Value(variable.type()));
       }
       this.debug_print_env();
@@ -251,8 +279,8 @@ export class BorrowChecker extends AbstractParseTreeVisitor<boolean> implements 
         throw new CheckerError(this.NOTDECLARED(functionName));
       }
       this.visitCallParams(call_params);
-    } else if (ctx.getChild(0) !== null) {
-      this.visit(ctx.getChild(0) as antlr.ParserRuleContext);
+    } else if (ctx.getChildCount() > 0) {
+      this.visitChildren(ctx);
     }
     return true;
   }
@@ -262,7 +290,7 @@ export class BorrowChecker extends AbstractParseTreeVisitor<boolean> implements 
       this.debug_print(`param: ${param.getText()}`);
       this.debug_print(`ctx: ${param.toStringTree(this.parser)}`);
       const source_variable = this.strict_lookup(param.getText());
-      source_variable.moveOwnedValue();
+      source_variable.dropOwnedValue();
     });
     return true;
   }
@@ -283,6 +311,7 @@ export class BorrowChecker extends AbstractParseTreeVisitor<boolean> implements 
     if (!isFunction) {
       throw new CheckerError(this.NOTDECLARED(variableName));
     }
+    this.visitChildren(ctx);
     return true;
   }
 
@@ -292,7 +321,10 @@ export class BorrowChecker extends AbstractParseTreeVisitor<boolean> implements 
     if (statements) {
       this.envStack.push(new Map<string, Variable>());
       this.visit(statements);
-      this.envStack.pop();
+      const lastEnv = this.envStack.pop();
+      for (const [_, variable] of lastEnv) {
+        variable.tryDropOwnedValue();
+      }
     }
     this.debug_print("exit block");
     return true;
