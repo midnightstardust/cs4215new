@@ -178,11 +178,11 @@ function run_borrow_checker(code: string): boolean {
 
   const tree = parser.crate();
   const borrow_checker = new BorrowChecker();
-  const borrow_checker_passed = borrow_checker.borrow_check(parser, tree, false);
+  const _modifiedCode = borrow_checker.borrow_check(parser, tree, tokens, false);
 
   // console.log(`AST:\n${tree.toStringTree(parser)}`);
 
-  return borrow_checker_passed;
+  return true;
 }
 
 describe('BorrowChecker Positive Cases', () => {

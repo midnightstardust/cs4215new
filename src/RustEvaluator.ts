@@ -24,10 +24,10 @@ export class RustEvaluator extends BasicEvaluator {
 
             const tree = parser.crate();
             const borrow_checker = new BorrowChecker();
-            const borrow_checker_passed = borrow_checker.borrow_check(parser, tree, true);
+            const modified_code = borrow_checker.borrow_check(parser, tree, tokens, true);
 
             this.conductor.sendOutput(`AST:\n${tree.toStringTree(parser)}`);
-            this.conductor.sendOutput(`Borrow Checker Result:\n${borrow_checker_passed}`);
+            this.conductor.sendOutput(`Borrow Checker Code:\n${modified_code}`);
         } catch (error) {
             if (error instanceof Error) {
                 this.conductor.sendOutput(`Error: ${error.message}`);

@@ -3,6 +3,7 @@ import { BlockExpressionContext, CrateContext, ExpressionContext, ExpressionStat
 import { RustParserVisitor } from "./parser/src/RustParserVisitor";
 import { AbstractParseTreeVisitor } from 'antlr4ng';
 
+const DROP_FUNCTION = "__drop__";
 const COPY_TRAIT_TYPES = ["i32", "bool"];
 
 function isCopyTraitType(type: string): boolean {
@@ -32,15 +33,15 @@ class Value {
     return !this._copyTrait;
   }
 
-  public drop(): void {
+  public drop(): boolean {
     if (this.hasCopyTrait()) {
-      return;
+      return false;
     }
     if (this._dropped) {
       throw new CheckerError(`value of type ${this.type} has been dropped`);
     }
     this._dropped = true;
-    console.log(`value of type ${this.type} is dropped`);
+    return true;
   }
 }
 
@@ -57,6 +58,10 @@ class Variable {
     this._type = type;
     this._value = undefined;
     this.assign_count = 0;
+  }
+
+  public name(): string {
+    return this._name;
   }
 
   public mutable(): boolean {
@@ -84,12 +89,13 @@ class Variable {
     }
   }
 
-  public tryDropOwnedValue(): void {
+  public tryDropOwnedValue(): boolean {
     if (this._value === undefined) {
-      return;
+      return false;
     }
-    this._value.drop();
+    const value = this._value;
     this._value = undefined;
+    return value.drop();
   }
 
   public dropOwnedValue(): void {
@@ -121,6 +127,7 @@ export class BorrowChecker extends AbstractParseTreeVisitor<boolean> implements 
   private parser: RustParser;
   private envStack: Map<string, Variable>[];
   private functions: Set<string>;
+  private rewriter: antlr.TokenStreamRewriter;
 
   private isAssignmentExpression(expr: ExpressionContext) {
     if (expr === null) {
@@ -201,9 +208,7 @@ export class BorrowChecker extends AbstractParseTreeVisitor<boolean> implements 
     }
     this.visit(ctx.blockExpression());
     const lastEnv = this.envStack.pop();
-    for (const [_, variable] of lastEnv) {
-      variable.tryDropOwnedValue();
-    }
+    this.insertDropForEnv(lastEnv, ctx.blockExpression());
     return true;
   }
 
@@ -261,12 +266,19 @@ export class BorrowChecker extends AbstractParseTreeVisitor<boolean> implements 
         this.debug_print(`ctx: ${child_expr.toStringTree(this.parser)}`);
         const path = child_expr as PathExpressionContext;
         const source_variable = this.strict_lookup(path.getText());
+        if (variable.hasOwnedValue() && !isCopyTraitType(variable.type())) {
+          const dropCode = `${DROP_FUNCTION}(${variableName});\n`;
+          this.rewriter.insertBefore(expr.start, dropCode);
+        }
         source_variable.moveOwnedValue(variable);
       } else {
         this.debug_print(`child_expr_else: ${child_expr.getText()}`);
         this.debug_print(`ctx: ${child_expr.toStringTree(this.parser)}`);
         this.visit(child_expr);
-        variable.tryDropOwnedValue();
+        if (variable.tryDropOwnedValue()) {
+          const dropCode = `${DROP_FUNCTION}(${variableName});\n`;
+          this.rewriter.insertBefore(expr.start, dropCode);
+        }
         variable.assignValue(new Value(variable.type()));
       }
       this.debug_print_env();
@@ -322,20 +334,37 @@ export class BorrowChecker extends AbstractParseTreeVisitor<boolean> implements 
       this.envStack.push(new Map<string, Variable>());
       this.visit(statements);
       const lastEnv = this.envStack.pop();
-      for (const [_, variable] of lastEnv) {
-        variable.tryDropOwnedValue();
-      }
+      this.insertDropForEnv(lastEnv, ctx);
     }
     this.debug_print("exit block");
     return true;
   }
 
-  public borrow_check(parser: RustParser, crate: CrateContext, debug: boolean): boolean {
+  insertDropForEnv(env: Map<string, Variable>, ctx: BlockExpressionContext): void {
+    let dropsToInsert = "";
+    for (const [_, variable] of env) {
+      if (variable.tryDropOwnedValue()) {
+        dropsToInsert += `${DROP_FUNCTION}(${variable.name()});\n`;
+      }
+    }
+    if (dropsToInsert.length !== 0) {
+      const stopToken = ctx.stop;
+      if (stopToken) {
+        this.rewriter.insertBefore(stopToken.tokenIndex, dropsToInsert);
+      } else {
+        throw new CheckerError("Could not find stop token for block to insert drops");
+      }
+    }
+  }
+
+  public borrow_check(parser: RustParser, crate: CrateContext, tokens: antlr.CommonTokenStream, debug: boolean): string {
     this.parser = parser;
     this.debug = debug;
     this.envStack = [];
     this.functions = new Set<string>();
-    this.visit(crate);
-    return true;
+    this.rewriter = new antlr.TokenStreamRewriter(tokens);
+    this.visit(crate)
+    const modifiedCode = this.rewriter.getText();
+    return modifiedCode;
   }
 }
