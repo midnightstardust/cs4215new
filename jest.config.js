@@ -5,5 +5,8 @@ export default {
   transform: {
     "^.+\.tsx?$": ["ts-jest"],
   },
-  testPathIgnorePatterns: ["<rootDir>/dist/"],  // Ignore compiled files
+  // Specify the test files to be included
+  testMatch: [
+    "**/__tests__/**/*.ts?(x)",
+  ],
 };
