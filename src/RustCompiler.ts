@@ -4,7 +4,7 @@ import * as antlr from "antlr4ng";
 
 import { AbstractParseTreeVisitor } from "antlr4ng";
 import { RustParserVisitor } from "./parser/src/RustParserVisitor";
-import { ArithmeticOrLogicalExpressionContext, AssignmentExpressionContext, BlockExpressionContext, CallExpressionContext, CallParamsContext, ComparisonExpressionContext, ComparisonOperatorContext, CrateContext, Function_Context, IdentifierContext, IfExpressionContext, LetStatementContext, LiteralExpressionContext, LoopExpressionContext, NegationExpressionContext, PathExpressionContext, PredicateLoopExpressionContext, ReturnExpressionContext, RustParser, StatementContext, StatementsContext } from "./parser/src/RustParser";
+import { ArithmeticOrLogicalExpressionContext, AssignmentExpressionContext, BlockExpressionContext, CallExpressionContext, CallParamsContext, ComparisonExpressionContext, ComparisonOperatorContext, CrateContext, Function_Context, IdentifierContext, IfExpressionContext, IndexExpressionContext, LetStatementContext, LiteralExpressionContext, LoopExpressionContext, MacroInvocationContext, MethodCallExpressionContext, NegationExpressionContext, PathExpressionContext, PathInExpressionContext, PredicateLoopExpressionContext, ReturnExpressionContext, RustParser, StatementContext, StatementsContext } from "./parser/src/RustParser";
 import { Instruction, InstructionType, UNDEFINED } from "./RustVM";
 
 export class CompileError extends Error {
@@ -264,8 +264,14 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
   visitAssignmentExpression(ctx: AssignmentExpressionContext) {
     this.visit(ctx.expression(1));
     this.visit(ctx.expression(0));
-    this.instructions.pop(); // remove load variable instruction
-    this.instructions.push({ type: InstructionType.ASSIGN });
+    const instruct = this.instructions.pop(); // remove load variable instruction
+    if (instruct.type === InstructionType.LOAD) {
+      this.instructions.push({ type: InstructionType.ASSIGN });
+    } else if (instruct.type === InstructionType.LOADHEAP) {
+      this.instructions.push({ type: InstructionType.ASSIGNHEAP });
+    } else {
+      throw new CompileError("Assignment expression not assigning to stack or heap value");
+    }
     this.instructions.push({ type: InstructionType.PUSH, operand: UNDEFINED });
   }
 
@@ -285,8 +291,20 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
     this.instructions.push({ type: InstructionType.LOAD });
   }
 
+  visitIndexExpression(ctx: IndexExpressionContext) {
+    this.visit(ctx.expression(0));
+    this.visit(ctx.expression(1));
+    this.instructions.push({ type: InstructionType.ADD });
+    this.instructions.push({ type: InstructionType.LOADHEAP });
+  }
+
   visitCallExpression(ctx: CallExpressionContext) {
     this.visit(ctx.callParams());
+
+    if (ctx.expression().getText() === "Vec::with_capacity") {
+      this.instructions.push({ type: InstructionType.MALLOC });
+      return;
+    }
 
     const functionIdentifier = (ctx.expression().getChild(0) as PathExpressionContext).pathInExpression()?.pathExprSegment(0)?.pathIdentSegment()?.identifier()?.NON_KEYWORD_IDENTIFIER();
     if (functionIdentifier === null || functionIdentifier === undefined) {
