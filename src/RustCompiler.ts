@@ -160,7 +160,7 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
 
   visitIfExpression(ctx: IfExpressionContext) {
     if (ctx.blockExpression().length !== 2) {
-      throw new CompileError(this.UNABLE_TO_EVAL_ERR(ctx));
+      throw new CompileError("If statement requires an else clause");
     }
 
     const condType = this.inferType(ctx.expression());
@@ -184,7 +184,7 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
   visitLoopExpression(ctx: LoopExpressionContext) {
     const child = ctx.predicateLoopExpression();
     if (child === null || child === undefined) {
-      throw new CompileError(this.UNABLE_TO_EVAL_ERR(ctx));
+      throw new CompileError("While loops take in a predicate and block expression");
     }
     this.visit(child);
   }
@@ -272,7 +272,7 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
   visitIdentifier(ctx: IdentifierContext) {
     const strIdentifier = ctx.NON_KEYWORD_IDENTIFIER();
     if (strIdentifier === null || strIdentifier === undefined) {
-      throw new CompileError(this.UNABLE_TO_EVAL_ERR(ctx));
+      throw new CompileError("Variable names must be non keyword identifiers");
     }
 
     const sym = strIdentifier.getText();
@@ -290,7 +290,7 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
 
     const functionIdentifier = (ctx.expression().getChild(0) as PathExpressionContext).pathInExpression()?.pathExprSegment(0)?.pathIdentSegment()?.identifier()?.NON_KEYWORD_IDENTIFIER();
     if (functionIdentifier === null || functionIdentifier === undefined) {
-      throw new CompileError(this.UNABLE_TO_EVAL_ERR(ctx));
+      throw new CompileError("function identifier missing in call expression");
     }
     const functionName = functionIdentifier.getText();
     const functionPC = this.getFunctionPC(functionName);
@@ -356,7 +356,7 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
   visitLetStatement(ctx: LetStatementContext) {
     const identifier = ctx.patternNoTopAlt().patternWithoutRange()?.identifierPattern()?.identifier()?.NON_KEYWORD_IDENTIFIER();
     if (identifier === null || identifier === undefined) {
-      throw new CompileError(this.UNABLE_TO_EVAL_ERR(ctx));
+      throw new CompileError("Invalid identifier in let statement");
     }
     const variableName = identifier.getText();
 
@@ -383,7 +383,7 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
 
     const functionIdentifier = ctx.identifier().NON_KEYWORD_IDENTIFIER();
     if (functionIdentifier === null || functionIdentifier === undefined) {
-      throw new CompileError(this.UNABLE_TO_EVAL_ERR(ctx));
+      throw new CompileError("function identifier missing in function definition");
     }
     const functionName = functionIdentifier.getText();
     if (
@@ -405,7 +405,7 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
       for(let i = params.length - 1; i >= 0; --i) {
         const varIdentifier = params[i].functionParamPattern()?.pattern()?.patternNoTopAlt(0)?.patternWithoutRange()?.identifierPattern()?.identifier()?.NON_KEYWORD_IDENTIFIER();
         if (varIdentifier === null || varIdentifier === undefined) {
-          throw new CompileError(this.UNABLE_TO_EVAL_ERR(ctx));
+          throw new CompileError("Invalid argument identifier in function declaration");
         }
         const varName = varIdentifier.getText();
         if (this.variableNamespace.at(-1).isSymInTopBlock(varName)) {
