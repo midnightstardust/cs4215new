@@ -101,6 +101,10 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
 
 
   private inferType(expr: antlr.ParserRuleContext): string {
+    //Typechecker does not check type of variable during compile time
+    if (expr.ruleIndex === RustParser.RULE_identifier) {
+      return "variable";
+    }   
     if (expr.getChildCount() === 0) {
       const text = expr.getText();
       if (text === "true" || text === "false") {
@@ -110,7 +114,7 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
         return "int";
       }
       throw new CompileError("Unable to infer type of expression (neither int or boolean): " + text);
-    }
+    }   
     if (expr.getChildCount() === 1) {
       return this.inferType(expr.getChild(0) as antlr.ParserRuleContext);
     }
@@ -126,8 +130,8 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
       return "bool";
     }
     if (this.isUnaryNotOperation(expression)) {
-      const subType = this.inferType(expression.getChild(1));
-      if (subType !== "bool") {
+      const subType = this.inferType(expression.getChild(1) as antlr.ParserRuleContext);
+      if (subType !== "bool" && subType !== "variable") {
         throw new CompileError("Type checker: Unary ! operator expects a boolean operand");
       }
       return "bool";
@@ -136,7 +140,7 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
       return "int";
     }
     if (this.isBracketExpression(expression)) {
-      return this.inferType(expression.getChild(1));
+      return this.inferType(expression.getChild(1) as antlr.ParserRuleContext);
     }
     throw new CompileError("Unable to infer type of expression: " + expr.toStringTree(this.parser));
   }
@@ -156,7 +160,6 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
     const text = expr.getText();
     return text.startsWith("(") && text.endsWith(")");
   }
-  
 
   visitIfExpression(ctx: IfExpressionContext) {
     if (ctx.blockExpression().length !== 2) {
@@ -164,7 +167,7 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
     }
 
     const condType = this.inferType(ctx.expression());
-    if (condType !== "bool") {
+    if (condType !== "bool" && condType !== "variable") {
         throw new CompileError("Type checker: If condition must be a boolean");
     }
 
@@ -193,7 +196,7 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
     const begin = this.instructions.length;
 
     const condType = this.inferType(ctx.expression());
-    if (condType !== "bool") {
+    if (condType !== "bool" && condType !== "variable") {
       throw new CompileError("Type checker: While condition must be a boolean");
     }
 
