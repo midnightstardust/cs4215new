@@ -219,7 +219,7 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
       this.instructions.push({ type: InstructionType.SUB });
     } else if (ctx.NOT() !== null) {
         const subType = this.inferType(ctx.expression());
-        if (subType !== "bool") {
+        if (subType !== "bool" && subType !== "variable") {
             throw new CompileError("Type checker: Unary ! operator expects a boolean operand");
         }
       this.visit(ctx.expression());
