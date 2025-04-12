@@ -102,6 +102,9 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
 
   private inferType(expr: antlr.ParserRuleContext): string {
     //Typechecker does not check type of variable during compile time
+    if (expr instanceof CallExpressionContext) {
+      return "variable";
+    }
     if (expr.ruleIndex === RustParser.RULE_identifier) {
       return "variable";
     }   
