@@ -24,13 +24,13 @@ export class RustEvaluator extends BasicEvaluator {
       const compiler = new RustCompiler();
       const vm = new RustVM();
       const tree = parser.crate();
-      this.conductor.sendOutput(`Crate Result:\n${tree.toStringTree(parser)}`);
+      // this.conductor.sendOutput(`Crate Result:\n${tree.toStringTree(parser)}`);
 
       const instructions = compiler.compile(parser, tree, DEBUG);
       vm.run(instructions, this.conductor, DEBUG);
       this.conductor.sendOutput("Evaluation completed!");
     } catch (error) {
-     console.log(error);
+    //  console.log(error);
       if (error instanceof CompileError) {
         this.conductor.sendOutput(`Compile Error: ${error.message}`);
       } else if (error instanceof VMError) {
