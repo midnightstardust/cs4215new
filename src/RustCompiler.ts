@@ -242,6 +242,10 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
       this.instructions.push({ type: InstructionType.MUL });
     } else if (ctx.SLASH() !== null) {
       this.instructions.push({ type: InstructionType.DIV });
+    } else if (ctx.AND() !== null) {
+      this.instructions.push({ type: InstructionType.AND });
+    } else if (ctx.OR() !== null) {
+      this.instructions.push({ type: InstructionType.OR })
     }
   }
 
