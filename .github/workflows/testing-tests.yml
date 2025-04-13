@@ -1,0 +1,32 @@
+# .github/workflows/testing-tests.yml
+name: CI - Testing Branch
+
+on:
+  push:
+    branches:
+      - testing
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Setup Node.js and Yarn
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --no-immutable
+
+      - name: Build Project
+        run: yarn build
+
+      - name: Run Tests
+        run: yarn test
