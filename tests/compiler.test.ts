@@ -2,7 +2,7 @@ import { CharStream, CommonTokenStream } from "antlr4ng";
 import { RustLexer } from "../src/parser/src/RustLexer";
 import { RustParser } from "../src/parser/src/RustParser";
 import { CompileError, RustCompiler } from "../src/RustCompiler";
-import { RustVM } from "../src/RustVM";
+import { RustVM, UNDEFINED } from "../src/RustVM";
 import { IRunnerPlugin } from "conductor/dist/conductor/runner/types";
 
 
@@ -72,10 +72,11 @@ describe('testing compiler', () => {
         while false {
           1;
         }
+        3;
       }
     `;
     const result = runEvaluator(code);
-    expect(result).toBe(0);
+    expect(result).toBe(3);
   });
   it('should not throw for `if true { … } else { … }`', () => {
     const code = `
