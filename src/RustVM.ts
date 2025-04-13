@@ -1,3 +1,5 @@
+import { IRunnerPlugin } from "conductor/dist/conductor/runner/types";
+
 const operandStackSize = 1024;
 const runtimeStackSize = 2048;
 
@@ -23,6 +25,7 @@ export enum InstructionType {
   CALL     = "CALL",
   DONE     = "DONE",
   ALLOCATE = "ALLOCATE",
+  DISPLAY  = "DISPLAY",
 }
 
 export interface Instruction {
@@ -187,7 +190,7 @@ export class RustVM {
     }
   }
 
-  public run(instructions: Instruction[], debug: boolean) : any {
+  public run(instructions: Instruction[], conductor: IRunnerPlugin, debug: boolean) : any {
     this.debug = debug;
     const runtimeStack = new RuntimeStack(runtimeStackSize);
     const operandStack = new OperandStack(operandStackSize);
@@ -276,6 +279,11 @@ export class RustVM {
         }
         case InstructionType.ALLOCATE: {
           runtimeStack.call(returnPC, operand as number);
+          break;
+        }
+        case InstructionType.DISPLAY: {
+          const a = operandStack.pop();
+          conductor.sendOutput(`DISPLAY: ${a}`)
           break;
         }
       }
