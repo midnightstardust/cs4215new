@@ -1,3 +1,5 @@
+import { IRunnerPlugin } from "conductor/dist/conductor/runner/types";
+
 const operandStackSize = 1024;
 const runtimeStackSize = 2048;
 
@@ -17,6 +19,8 @@ export enum InstructionType {
   LE         = "LE",
   GE         = "GE",
   NOT        = "NOT",
+  AND        = "AND",
+  OR         = "OR",
   JMP        = "JMP",
   JZ         = "JZ",
   RETURN     = "RETURN",
@@ -27,6 +31,7 @@ export enum InstructionType {
   ASSIGNHEAP = "ASSIGNHEAP",
   MALLOC     = "MALLOC",
   FREE       = "FREE",
+  DISPLAY    = "DISPLAY",
 }
 
 export interface Instruction {
@@ -212,6 +217,8 @@ export class RustVM {
     [InstructionType.NE , (x, y) => x !== y],
     [InstructionType.LE , (x, y) => x <=  y],
     [InstructionType.GE , (x, y) => x >=  y],
+    [InstructionType.AND, (x, y) => x && y],
+    [InstructionType.OR,  (x, y) => x || y],
   ])
   private debug: boolean;
   private DEBUG(...v: any): void {
@@ -220,7 +227,7 @@ export class RustVM {
     }
   }
 
-  public run(instructions: Instruction[], debug: boolean) : any {
+  public run(instructions: Instruction[], conductor: IRunnerPlugin, debug: boolean) : any {
     this.debug = debug;
     const runtimeStack = new RuntimeStack(runtimeStackSize);
     const operandStack = new OperandStack(operandStackSize);
@@ -249,7 +256,9 @@ export class RustVM {
         case InstructionType.EQ:
         case InstructionType.NE:
         case InstructionType.LE:
-        case InstructionType.GE: {
+        case InstructionType.GE: 
+        case InstructionType.AND:
+        case InstructionType.OR:{
           const b = operandStack.pop();
           const a = operandStack.pop();
           operandStack.push(this.binOps.get(instruct.type)(a, b));
@@ -281,6 +290,9 @@ export class RustVM {
         }
         case InstructionType.NOT: {
           const a = operandStack.pop();
+          if (a !== 0 && a !== 1) {
+            throw new VMError("Runtime error: condition is not a boolean value.");
+          }
           operandStack.push(!a);
           break;
         }
@@ -290,6 +302,9 @@ export class RustVM {
         }
         case InstructionType.JZ: {
           const a = operandStack.pop();
+          if (a !== 0 && a !== 1) {
+            throw new VMError("Runtime error: condition is not a boolean value.");
+          }
           if (!a) {
             PC = operand as number;
             continue;
@@ -332,6 +347,10 @@ export class RustVM {
         case InstructionType.FREE: {
           const address = operandStack.pop();
           heap.free(address);
+        }
+        case InstructionType.DISPLAY: {
+          const a = operandStack.pop();
+          conductor.sendOutput(`DISPLAY: ${a}`)
           break;
         }
       }
