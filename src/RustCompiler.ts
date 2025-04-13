@@ -296,13 +296,22 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
   }
 
   visitCallExpression(ctx: CallExpressionContext) {
-    this.visit(ctx.callParams());
+    const callParams = ctx.callParams();
+    if (callParams !== null && callParams !== undefined) {
+      this.visit(callParams);
+    }
 
     const functionIdentifier = (ctx.expression().getChild(0) as PathExpressionContext).pathInExpression()?.pathExprSegment(0)?.pathIdentSegment()?.identifier()?.NON_KEYWORD_IDENTIFIER();
     if (functionIdentifier === null || functionIdentifier === undefined) {
       throw new CompileError(this.UNABLE_TO_EVAL_ERR(ctx));
     }
     const functionName = functionIdentifier.getText();
+    if (functionName === "display") {
+      this.instructions.push({ type: InstructionType.DISPLAY });
+      this.instructions.push({ type: InstructionType.PUSH, operand: UNDEFINED });
+      return;
+    }
+
     const functionPC = this.getFunctionPC(functionName);
     if (functionPC === -1) {
       throw new CompileError(this.NOT_DECLARED_ERR(functionName));
