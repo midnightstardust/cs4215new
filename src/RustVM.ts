@@ -19,6 +19,8 @@ export enum InstructionType {
   LE       = "LE",
   GE       = "GE",
   NOT      = "NOT",
+  AND      = "AND",
+  OR       = "OR",
   JMP      = "JMP",
   JZ       = "JZ",
   RETURN   = "RETURN",
@@ -182,6 +184,8 @@ export class RustVM {
     [InstructionType.NE , (x, y) => x !== y],
     [InstructionType.LE , (x, y) => x <=  y],
     [InstructionType.GE , (x, y) => x >=  y],
+    [InstructionType.AND, (x, y) => x && y],
+    [InstructionType.OR,  (x, y) => x || y],
   ])
   private debug: boolean;
   private DEBUG(...v: any): void {
@@ -218,7 +222,9 @@ export class RustVM {
         case InstructionType.EQ:
         case InstructionType.NE:
         case InstructionType.LE:
-        case InstructionType.GE: {
+        case InstructionType.GE: 
+        case InstructionType.AND:
+        case InstructionType.OR:{
           const b = operandStack.pop();
           const a = operandStack.pop();
           operandStack.push(this.binOps.get(instruct.type)(a, b));
@@ -250,6 +256,9 @@ export class RustVM {
         }
         case InstructionType.NOT: {
           const a = operandStack.pop();
+          if (a !== 0 && a !== 1) {
+            throw new VMError("Runtime error: condition is not a boolean value.");
+          }
           operandStack.push(!a);
           break;
         }
@@ -259,6 +268,9 @@ export class RustVM {
         }
         case InstructionType.JZ: {
           const a = operandStack.pop();
+          if (a !== 0 && a !== 1) {
+            throw new VMError("Runtime error: condition is not a boolean value.");
+          }
           if (!a) {
             PC = operand as number;
             continue;

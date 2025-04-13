@@ -7,7 +7,6 @@ import { RustParserVisitor } from "./parser/src/RustParserVisitor";
 import { ArithmeticOrLogicalExpressionContext, AssignmentExpressionContext, BlockExpressionContext, CallExpressionContext, CallParamsContext, ComparisonExpressionContext, ComparisonOperatorContext, CrateContext, Function_Context, IdentifierContext, IfExpressionContext, LetStatementContext, LiteralExpressionContext, LoopExpressionContext, NegationExpressionContext, PathExpressionContext, PredicateLoopExpressionContext, ReturnExpressionContext, RustParser, StatementContext, StatementsContext } from "./parser/src/RustParser";
 import { Instruction, InstructionType, UNDEFINED } from "./RustVM";
 
-
 export class CompileError extends Error {
   public constructor(message?: string) {
     super(message);
@@ -102,6 +101,13 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
 
 
   private inferType(expr: antlr.ParserRuleContext): string {
+    //Typechecker does not check type of variable during compile time
+    if (expr instanceof CallExpressionContext) {
+      return "variable";
+    }
+    if (expr.ruleIndex === RustParser.RULE_identifier) {
+      return "variable";
+    }   
     if (expr.getChildCount() === 0) {
       const text = expr.getText();
       if (text === "true" || text === "false") {
@@ -111,7 +117,7 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
         return "int";
       }
       throw new CompileError("Unable to infer type of expression (neither int or boolean): " + text);
-    }
+    }   
     if (expr.getChildCount() === 1) {
       return this.inferType(expr.getChild(0) as antlr.ParserRuleContext);
     }
@@ -127,10 +133,8 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
       return "bool";
     }
     if (this.isUnaryNotOperation(expression)) {
-      const subType = this.inferType(
-            expression.getChild(1) as antlr.ParserRuleContext
-         );
-      if (subType !== "bool") {
+      const subType = this.inferType(expression.getChild(1) as antlr.ParserRuleContext);
+      if (subType !== "bool" && subType !== "variable") {
         throw new CompileError("Type checker: Unary ! operator expects a boolean operand");
       }
       return "bool";
@@ -139,9 +143,7 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
       return "int";
     }
     if (this.isBracketExpression(expression)) {
-          return this.inferType(
-            expression.getChild(1) as antlr.ParserRuleContext
-          );
+      return this.inferType(expression.getChild(1) as antlr.ParserRuleContext);
     }
     throw new CompileError("Unable to infer type of expression: " + expr.toStringTree(this.parser));
   }
@@ -161,15 +163,14 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
     const text = expr.getText();
     return text.startsWith("(") && text.endsWith(")");
   }
-  
 
   visitIfExpression(ctx: IfExpressionContext) {
     if (ctx.blockExpression().length !== 2) {
-      throw new CompileError(this.UNABLE_TO_EVAL_ERR(ctx));
+      throw new CompileError("If statement requires an else clause");
     }
 
     const condType = this.inferType(ctx.expression());
-    if (condType !== "bool") {
+    if (condType !== "bool" && condType !== "variable") {
         throw new CompileError("Type checker: If condition must be a boolean");
     }
 
@@ -189,7 +190,7 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
   visitLoopExpression(ctx: LoopExpressionContext) {
     const child = ctx.predicateLoopExpression();
     if (child === null || child === undefined) {
-      throw new CompileError(this.UNABLE_TO_EVAL_ERR(ctx));
+      throw new CompileError("While loops take in a predicate and block expression");
     }
     this.visit(child);
   }
@@ -198,7 +199,7 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
     const begin = this.instructions.length;
 
     const condType = this.inferType(ctx.expression());
-    if (condType !== "bool") {
+    if (condType !== "bool" && condType !== "variable") {
       throw new CompileError("Type checker: While condition must be a boolean");
     }
 
@@ -221,7 +222,7 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
       this.instructions.push({ type: InstructionType.SUB });
     } else if (ctx.NOT() !== null) {
         const subType = this.inferType(ctx.expression());
-        if (subType !== "bool") {
+        if (subType !== "bool" && subType !== "variable") {
             throw new CompileError("Type checker: Unary ! operator expects a boolean operand");
         }
       this.visit(ctx.expression());
@@ -241,6 +242,10 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
       this.instructions.push({ type: InstructionType.MUL });
     } else if (ctx.SLASH() !== null) {
       this.instructions.push({ type: InstructionType.DIV });
+    } else if (ctx.AND() !== null) {
+      this.instructions.push({ type: InstructionType.AND });
+    } else if (ctx.OR() !== null) {
+      this.instructions.push({ type: InstructionType.OR })
     }
   }
 
@@ -277,7 +282,7 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
   visitIdentifier(ctx: IdentifierContext) {
     const strIdentifier = ctx.NON_KEYWORD_IDENTIFIER();
     if (strIdentifier === null || strIdentifier === undefined) {
-      throw new CompileError(this.UNABLE_TO_EVAL_ERR(ctx));
+      throw new CompileError("Variable names must be non keyword identifiers");
     }
 
     const sym = strIdentifier.getText();
@@ -298,7 +303,7 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
 
     const functionIdentifier = (ctx.expression().getChild(0) as PathExpressionContext).pathInExpression()?.pathExprSegment(0)?.pathIdentSegment()?.identifier()?.NON_KEYWORD_IDENTIFIER();
     if (functionIdentifier === null || functionIdentifier === undefined) {
-      throw new CompileError(this.UNABLE_TO_EVAL_ERR(ctx));
+      throw new CompileError("function identifier missing in call expression");
     }
     const functionName = functionIdentifier.getText();
     if (functionName === "display") {
@@ -370,7 +375,7 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
   visitLetStatement(ctx: LetStatementContext) {
     const identifier = ctx.patternNoTopAlt().patternWithoutRange()?.identifierPattern()?.identifier()?.NON_KEYWORD_IDENTIFIER();
     if (identifier === null || identifier === undefined) {
-      throw new CompileError(this.UNABLE_TO_EVAL_ERR(ctx));
+      throw new CompileError("Invalid identifier in let statement");
     }
     const variableName = identifier.getText();
 
@@ -397,7 +402,7 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
 
     const functionIdentifier = ctx.identifier().NON_KEYWORD_IDENTIFIER();
     if (functionIdentifier === null || functionIdentifier === undefined) {
-      throw new CompileError(this.UNABLE_TO_EVAL_ERR(ctx));
+      throw new CompileError("function identifier missing in function definition");
     }
     const functionName = functionIdentifier.getText();
     if (
@@ -419,7 +424,7 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
       for(let i = params.length - 1; i >= 0; --i) {
         const varIdentifier = params[i].functionParamPattern()?.pattern()?.patternNoTopAlt(0)?.patternWithoutRange()?.identifierPattern()?.identifier()?.NON_KEYWORD_IDENTIFIER();
         if (varIdentifier === null || varIdentifier === undefined) {
-          throw new CompileError(this.UNABLE_TO_EVAL_ERR(ctx));
+          throw new CompileError("Invalid argument identifier in function declaration");
         }
         const varName = varIdentifier.getText();
         if (this.variableNamespace.at(-1).isSymInTopBlock(varName)) {
