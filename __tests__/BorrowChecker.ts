@@ -78,6 +78,15 @@ fn main() {
 }
 `],
 
+["Assigning array index",
+`
+fn main() {
+    let mut a : Vec<i32> = Vec::with_capacity(3);
+    a[0] = 1;
+    return;
+}
+`],
+
 ];
 
 const negativeTestCases: Array<[string, string]> = [
@@ -167,6 +176,17 @@ fn main() {
 }
 `
 ],
+
+["Accessing moved array",
+`
+fn main() {
+    let mut a : Vec<i32> = Vec::with_capacity(3);
+    a[0] = 1;
+    display(a[0]);
+    a;
+    return;
+}
+`],
 
 ];
 

@@ -159,21 +159,31 @@ export class BorrowChecker extends AbstractParseTreeVisitor<boolean> implements 
     return this.envStack[this.envStack.length - 1];
   }
 
+  private stripArrayIndex(input: string): string {
+    const match = input.match(/^([a-zA-Z_]\w*)(?:\[\d+\])?$/);
+    if (match) {
+        return match[1];
+    }
+    return input;
+}
+
   private strict_lookup(name: string): Variable {
+    const strippedName = this.stripArrayIndex(name);
     for (let i = this.envStack.length - 1; i >= 0; i--) {
       const env = this.envStack[i];
-      if (env.has(name)) {
-        return env.get(name);
+      if (env.has(strippedName)) {
+        return env.get(strippedName);
       }
     }
-    throw new CheckerError(this.NOTDECLARED(name));
+    throw new CheckerError(this.NOTDECLARED(strippedName));
   }
 
   private lookup(name: string): Variable | undefined {
+    const strippedName = this.stripArrayIndex(name);
     for (let i = this.envStack.length - 1; i >= 0; i--) {
       const env = this.envStack[i];
-      if (env.has(name)) {
-        return env.get(name);
+      if (env.has(strippedName)) {
+        return env.get(strippedName);
       }
     }
     return undefined;
