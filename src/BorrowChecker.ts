@@ -4,6 +4,7 @@ import { RustParserVisitor } from "./parser/src/RustParserVisitor";
 import { AbstractParseTreeVisitor } from 'antlr4ng';
 
 const DROP_FUNCTION = "__drop__";
+const BUILTIN_FUNCTIONS = ["display"];
 const COPY_TRAIT_TYPES = ["i32", "bool"];
 
 function isCopyTraitType(type: string): boolean {
@@ -361,7 +362,7 @@ export class BorrowChecker extends AbstractParseTreeVisitor<boolean> implements 
     this.parser = parser;
     this.debug = debug;
     this.envStack = [];
-    this.functions = new Set<string>();
+    this.functions = new Set<string>(BUILTIN_FUNCTIONS);
     this.rewriter = new antlr.TokenStreamRewriter(tokens);
     this.visit(crate)
     const modifiedCode = this.rewriter.getText();
