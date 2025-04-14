@@ -103,8 +103,9 @@ class Variable {
     if (this._value === undefined) {
       throw new CheckerError("value has already been moved");
     }
-    this._value.drop();
-    this._value = undefined;
+    if (this._value.drop()) {
+      this._value = undefined;
+    }
   }
 
   public assignValue(value: Value): void {
