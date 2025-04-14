@@ -4,30 +4,34 @@ const operandStackSize = 1024;
 const runtimeStackSize = 2048;
 
 export enum InstructionType {
-  PUSH     = "PUSH",
-  ADD      = "ADD",
-  SUB      = "SUB",
-  MUL      = "MUL",
-  DIV      = "DIV",
-  POP      = "POP",
-  LOAD     = "LOAD",
-  ASSIGN   = "ASSIGN",
-  LT       = "LT",
-  GT       = "GT",
-  EQ       = "EQ",
-  NE       = "NE",
-  LE       = "LE",
-  GE       = "GE",
-  NOT      = "NOT",
-  AND      = "AND",
-  OR       = "OR",
-  JMP      = "JMP",
-  JZ       = "JZ",
-  RETURN   = "RETURN",
-  CALL     = "CALL",
-  DONE     = "DONE",
-  ALLOCATE = "ALLOCATE",
-  DISPLAY  = "DISPLAY",
+  PUSH       = "PUSH",
+  ADD        = "ADD",
+  SUB        = "SUB",
+  MUL        = "MUL",
+  DIV        = "DIV",
+  POP        = "POP",
+  LOAD       = "LOAD",
+  ASSIGN     = "ASSIGN",
+  LT         = "LT",
+  GT         = "GT",
+  EQ         = "EQ",
+  NE         = "NE",
+  LE         = "LE",
+  GE         = "GE",
+  NOT        = "NOT",
+  AND        = "AND",
+  OR         = "OR",
+  JMP        = "JMP",
+  JZ         = "JZ",
+  RETURN     = "RETURN",
+  CALL       = "CALL",
+  DONE       = "DONE",
+  ALLOCATE   = "ALLOCATE",
+  LOADHEAP   = "LOADHEAP",
+  ASSIGNHEAP = "ASSIGNHEAP",
+  MALLOC     = "MALLOC",
+  FREE       = "FREE",
+  DISPLAY    = "DISPLAY",
 }
 
 export interface Instruction {
@@ -35,7 +39,7 @@ export interface Instruction {
   operand?: number | string;
 }
 
-export const UNDEFINED = "undefined";
+export const UNDEFINED = 0;
 
 class OperandStack {
   private stack: DataView;
@@ -167,6 +171,35 @@ class RuntimeStack {
   }
 }
 
+// TODO: make this realistic
+class Heap {
+  private address_to_value: Map<number, number>;
+  private sz: number;
+
+  constructor() {
+    this.address_to_value = new Map<number, number>();
+    this.sz = 0;
+  }
+
+  load(address: number) : number {
+    return this.address_to_value.get(address);
+  }
+
+  assign(address: number, value: number) : void {
+    this.address_to_value.set(address, value);
+  }
+
+  malloc(sz: number) : number {
+    const res = this.sz;
+    this.sz += sz;
+    return sz;
+  }
+
+  free(address: number) : void {
+
+  }
+}
+
 export class VMError extends Error {
   public constructor(message?: string) {
     super(message);
@@ -198,6 +231,7 @@ export class RustVM {
     this.debug = debug;
     const runtimeStack = new RuntimeStack(runtimeStackSize);
     const operandStack = new OperandStack(operandStackSize);
+    const heap = new Heap();
     let PC = 0, returnPC = 0;
 
     while(PC < instructions.length) {
@@ -292,6 +326,27 @@ export class RustVM {
         case InstructionType.ALLOCATE: {
           runtimeStack.call(returnPC, operand as number);
           break;
+        }
+        case InstructionType.LOADHEAP: {
+          const address = operandStack.pop();
+          operandStack.push(heap.load(address));
+          break;
+        }
+        case InstructionType.ASSIGNHEAP: {
+          const address = operandStack.pop();
+          const value = operandStack.pop();
+          heap.assign(address, value);
+          break;
+        }
+        case InstructionType.MALLOC: {
+          const sz = operandStack.pop();
+          const address = heap.malloc(sz);
+          operandStack.push(address);
+          break;
+        }
+        case InstructionType.FREE: {
+          const address = operandStack.pop();
+          heap.free(address);
         }
         case InstructionType.DISPLAY: {
           const a = operandStack.pop();
