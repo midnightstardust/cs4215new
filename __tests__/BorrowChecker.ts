@@ -87,6 +87,17 @@ fn main() {
 }
 `],
 
+["Literal in function call",
+`
+fn main() {
+    let mut a : Vec<i32>;
+    a = Vec::with_capacity(3);
+    a[0] = 1;
+    display(a[0]);
+    return;
+}
+`],
+
 ];
 
 const negativeTestCases: Array<[string, string]> = [

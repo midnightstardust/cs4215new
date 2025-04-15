@@ -316,6 +316,10 @@ export class BorrowChecker extends AbstractParseTreeVisitor<boolean> implements 
     ctx.expression().forEach((param) => {
       this.debug_print(`param: ${param.getText()}`);
       this.debug_print(`ctx: ${param.toStringTree(this.parser)}`);
+      const expr = param.getChild(0) as ExpressionContext;
+      if (expr.ruleIndex === RustParser.RULE_literalExpression) {
+        return true;
+      }
       const source_variable = this.strict_lookup(param.getText());
       source_variable.dropOwnedValue();
     });
