@@ -270,6 +270,7 @@ export class BorrowChecker extends AbstractParseTreeVisitor<boolean> implements 
       const path_expr = expr.getChild(0) as PathExpressionContext;
       const variableName = path_expr.getText();
       const variable = this.strict_lookup(variableName);
+      const isIndexAssignment = variableName.endsWith("]");
       const child_expr = (expr.getChild(2) as ExpressionContext).getChildCount() > 1
                         ? (expr.getChild(2) as ExpressionContext)
                         : (expr.getChild(2) as ExpressionContext).getChild(0) as antlr.ParserRuleContext;
@@ -287,11 +288,13 @@ export class BorrowChecker extends AbstractParseTreeVisitor<boolean> implements 
         this.debug_print(`child_expr_else: ${child_expr.getText()}`);
         this.debug_print(`ctx: ${child_expr.toStringTree(this.parser)}`);
         this.visit(child_expr);
-        if (variable.tryDropOwnedValue()) {
-          const dropCode = `${DROP_FUNCTION}(${variableName});\n`;
-          this.rewriter.insertBefore(expr.start, dropCode);
+        if (!isIndexAssignment) {
+          if (variable.tryDropOwnedValue()) {
+            const dropCode = `${DROP_FUNCTION}(${variableName});\n`;
+            this.rewriter.insertBefore(expr.start, dropCode);
+          }
+          variable.assignValue(new Value(variable.type()));
         }
-        variable.assignValue(new Value(variable.type()));
       }
       this.debug_print_env();
     } else if (this.isFunctionCallWithParams(expr)) {
@@ -377,6 +380,7 @@ export class BorrowChecker extends AbstractParseTreeVisitor<boolean> implements 
     this.rewriter = new antlr.TokenStreamRewriter(tokens);
     this.visit(crate)
     const modifiedCode = this.rewriter.getText();
+    this.debug_print(`Modified code:\n${modifiedCode}`);
     return modifiedCode;
   }
 }
