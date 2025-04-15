@@ -2,6 +2,8 @@ import { IRunnerPlugin } from "conductor/dist/conductor/runner/types";
 
 const operandStackSize = 1024;
 const runtimeStackSize = 2048;
+const WORD_SIZE = 4; // 4 bytes is a 32 bit int
+const HEAP_SIZE = 1024; // Size in words
 
 export enum InstructionType {
   PUSH       = "PUSH",
@@ -171,32 +173,65 @@ class RuntimeStack {
   }
 }
 
-// TODO: make this realistic
 class Heap {
-  private address_to_value: Map<number, number>;
-  private sz: number;
+  private buffer: ArrayBuffer;
+  private dataView: DataView;
+  private freeBlocks: { start: number; size: number }[];
 
-  constructor() {
-    this.address_to_value = new Map<number, number>();
-    this.sz = 0;
+  constructor(sizeInWords: number) {
+    this.buffer = new ArrayBuffer(sizeInWords * WORD_SIZE);
+    this.dataView = new DataView(this.buffer);
+    this.freeBlocks = [{ start: 0, size: sizeInWords }];
   }
 
-  load(address: number) : number {
-    return this.address_to_value.get(address);
+  load(address: number): number {
+    const byteOffset = address * WORD_SIZE;
+    return this.dataView.getInt32(byteOffset, true);
   }
 
-  assign(address: number, value: number) : void {
-    this.address_to_value.set(address, value);
+  assign(address: number, value: number): void {
+    const byteOffset = address * WORD_SIZE;
+    this.dataView.setInt32(byteOffset, value, true);
   }
 
-  malloc(sz: number) : number {
-    const res = this.sz;
-    this.sz += sz;
-    return res;
+  malloc(szWords: number): number {
+    const requiredSize = szWords + 1; // Including header
+    for (let i = 0; i < this.freeBlocks.length; i++) {
+      const block = this.freeBlocks[i];
+      if (block.size >= requiredSize) {
+        // Allocate from this block
+        this.freeBlocks.splice(i, 1);
+        const allocatedStart = block.start;
+        const remainingSize = block.size - requiredSize;
+        if (remainingSize > 0) {
+          this.freeBlocks.push({ start: allocatedStart + requiredSize, size: remainingSize });
+        }
+        // Write header (size szWords)
+        this.assign(allocatedStart, szWords);
+        // Return the address after the header
+        return allocatedStart + 1;
+      }
+    }
+    return -1; // Indicate failure
   }
 
-  free(address: number) : void {
-
+  free(address: number): void {
+    const headerAddress = address - 1;
+    const szWords = this.load(headerAddress);
+    const blockSize = szWords + 1;
+    const newBlock = { start: headerAddress, size: blockSize };
+    this.freeBlocks.push(newBlock);
+    // Merge adjacent blocks
+    this.freeBlocks.sort((a, b) => a.start - b.start);
+    for (let i = 0; i < this.freeBlocks.length - 1; i++) {
+      const current = this.freeBlocks[i];
+      const next = this.freeBlocks[i + 1];
+      if (current.start + current.size === next.start) {
+        current.size += next.size;
+        this.freeBlocks.splice(i + 1, 1);
+        i--; // Re-check current with new next
+      }
+    }
   }
 }
 
@@ -231,7 +266,7 @@ export class RustVM {
     this.debug = debug;
     const runtimeStack = new RuntimeStack(runtimeStackSize);
     const operandStack = new OperandStack(operandStackSize);
-    const heap = new Heap();
+    const heap = new Heap(HEAP_SIZE);
     let PC = 0, returnPC = 0;
 
     while(PC < instructions.length) {
@@ -248,7 +283,7 @@ export class RustVM {
           operandStack.push(operand);
           break;
         }
-        case InstructionType.ADD: 
+        case InstructionType.ADD:
         case InstructionType.SUB:
         case InstructionType.MUL:
         case InstructionType.LT:
@@ -256,7 +291,7 @@ export class RustVM {
         case InstructionType.EQ:
         case InstructionType.NE:
         case InstructionType.LE:
-        case InstructionType.GE: 
+        case InstructionType.GE:
         case InstructionType.AND:
         case InstructionType.OR:{
           const b = operandStack.pop();
@@ -308,7 +343,7 @@ export class RustVM {
           if (!a) {
             PC = operand as number;
             continue;
-          } 
+          }
           break;
         }
         case InstructionType.RETURN: {
@@ -341,6 +376,9 @@ export class RustVM {
         case InstructionType.MALLOC: {
           const sz = operandStack.pop();
           const address = heap.malloc(sz);
+          if (address === -1) {
+            throw new VMError("MALLOC: out of memory");
+          }
           operandStack.push(address);
           break;
         }
@@ -356,6 +394,6 @@ export class RustVM {
         }
       }
       ++PC;
-    } 
+    }
   }
 }
