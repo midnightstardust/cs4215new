@@ -7,9 +7,7 @@ on:
 jobs:
   build:
     name: Build runner
-
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -29,6 +27,9 @@ jobs:
       - name: yarn build
         run: yarn build
 
+      - name: yarn test
+        run: yarn test
+
       - name: Upload artifacts
         id: deployment
         uses: actions/upload-pages-artifact@v3
@@ -37,19 +38,14 @@ jobs:
 
   deploy:
     needs: build
-
     name: Deploy runner
-
     permissions:
       pages: write
       id-token: write
-
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-
     runs-on: ubuntu-latest
-
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
