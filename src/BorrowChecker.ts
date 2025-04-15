@@ -11,7 +11,7 @@ function isCopyTraitType(type: string): boolean {
   return COPY_TRAIT_TYPES.includes(type);
 }
 
-class CheckerError extends Error {
+export class CheckerError extends Error {
   public constructor(message?: string) {
     super(message);
   }

@@ -5,7 +5,7 @@ import { IRunnerPlugin } from "conductor/dist/conductor/runner/types";
 import { CharStream, CommonTokenStream } from "antlr4ng";
 import { RustLexer } from "./parser/src/RustLexer";
 import { CrateContext, RustParser } from "./parser/src/RustParser";
-import { BorrowChecker } from "./BorrowChecker";
+import { BorrowChecker, CheckerError } from "./BorrowChecker";
 import { CompileError, RustCompiler } from "./RustCompiler";
 import { RustVM, VMError } from "./RustVM";
 import { ConductorError } from "conductor/dist/common/errors";
@@ -45,8 +45,8 @@ export class RustEvaluator extends BasicEvaluator {
         this.conductor.sendOutput(`Compile Error: ${error.message}`);
       } else if (error instanceof VMError) {
         this.conductor.sendOutput(`VM execution Error: ${error.message}`);
-      } else if (error instanceof Error) {
-        this.conductor.sendOutput(`Error: ${error.message}`);
+      } else if (error instanceof CheckerError) {
+        this.conductor.sendOutput(`BorrowChecker Error: ${error.message}`);
       } else {
         this.conductor.sendOutput(`Error: ${String(error)}`);
       }
