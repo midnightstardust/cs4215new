@@ -4,7 +4,8 @@ import { BasicEvaluator } from "conductor/dist/conductor/runner";
 import { IRunnerPlugin } from "conductor/dist/conductor/runner/types";
 import { CharStream, CommonTokenStream } from "antlr4ng";
 import { RustLexer } from "./parser/src/RustLexer";
-import { RustParser } from "./parser/src/RustParser";
+import { CrateContext, RustParser } from "./parser/src/RustParser";
+import { BorrowChecker } from "./BorrowChecker";
 import { CompileError, RustCompiler } from "./RustCompiler";
 import { RustVM, VMError } from "./RustVM";
 import { ConductorError } from "conductor/dist/common/errors";
@@ -15,18 +16,27 @@ export class RustEvaluator extends BasicEvaluator {
     super(plugin);
   }
 
+  parseCode(code: string): [CommonTokenStream, RustParser, CrateContext] {
+    const input = CharStream.fromString(code);
+    const lexer = new RustLexer(input);
+    const tokens = new CommonTokenStream(lexer);
+    const parser = new RustParser(tokens);
+    const tree = parser.crate();
+    return [tokens, parser, tree];
+  }
+
   async evaluateChunk(code: string): Promise<void> {
     try {
-      const input = CharStream.fromString(code);
-      const lexer = new RustLexer(input);
-      const tokens = new CommonTokenStream(lexer);
-      const parser = new RustParser(tokens);
       const compiler = new RustCompiler();
       const vm = new RustVM();
-      const tree = parser.crate();
+      const [tokens, parser, tree] = this.parseCode(code);
       // this.conductor.sendOutput(`Crate Result:\n${tree.toStringTree(parser)}`);
 
-      const instructions = compiler.compile(parser, tree, DEBUG);
+      const borrow_checker = new BorrowChecker();
+      const modifiedCode = borrow_checker.borrow_check(parser, tree, tokens, DEBUG);
+      const [_, parserN, treeN] = this.parseCode(modifiedCode);
+
+      const instructions = compiler.compile(parserN, treeN, DEBUG);
       vm.run(instructions, this.conductor, DEBUG);
       this.conductor.sendOutput("Evaluation completed!");
     } catch (error) {

@@ -192,7 +192,7 @@ class Heap {
   malloc(sz: number) : number {
     const res = this.sz;
     this.sz += sz;
-    return sz;
+    return res;
   }
 
   free(address: number) : void {
@@ -347,6 +347,7 @@ export class RustVM {
         case InstructionType.FREE: {
           const address = operandStack.pop();
           heap.free(address);
+          break;
         }
         case InstructionType.DISPLAY: {
           const a = operandStack.pop();

@@ -3,9 +3,9 @@
 import * as antlr from "antlr4ng";
 import { Token } from "antlr4ng";
 
-import { RustParserListener } from "./RustParserListener.js";
-import { RustParserVisitor } from "./RustParserVisitor.js";
-import RustParserBase from "./RustParserBase.js";
+import { RustParserListener } from "./RustParserListener";
+import { RustParserVisitor } from "./RustParserVisitor";
+import RustParserBase from "./RustParserBase";
 
 // for running tests with parameters, TODO: discuss strategy for typed parameters in CI
 // eslint-disable-next-line no-unused-vars

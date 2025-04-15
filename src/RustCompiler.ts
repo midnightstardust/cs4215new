@@ -319,6 +319,12 @@ export class RustCompiler extends AbstractParseTreeVisitor<void> implements Rust
       return;
     }
 
+    if (ctx.expression().getText() === "__drop__") {
+      this.instructions.push({ type: InstructionType.FREE });
+      this.instructions.push({ type: InstructionType.PUSH, operand: UNDEFINED });
+      return;
+    }
+
     const functionIdentifier = (ctx.expression().getChild(0) as PathExpressionContext).pathInExpression()?.pathExprSegment(0)?.pathIdentSegment()?.identifier()?.NON_KEYWORD_IDENTIFIER();
     if (functionIdentifier === null || functionIdentifier === undefined) {
       throw new CompileError("function identifier missing in call expression");
