@@ -325,9 +325,6 @@ export class RustVM {
         }
         case InstructionType.NOT: {
           const a = operandStack.pop();
-          if (a !== 0 && a !== 1) {
-            throw new VMError("Runtime error: condition is not a boolean value.");
-          }
           operandStack.push(!a);
           break;
         }
@@ -337,9 +334,6 @@ export class RustVM {
         }
         case InstructionType.JZ: {
           const a = operandStack.pop();
-          if (a !== 0 && a !== 1) {
-            throw new VMError("Runtime error: condition is not a boolean value.");
-          }
           if (!a) {
             PC = operand as number;
             continue;
