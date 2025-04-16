@@ -14,6 +14,10 @@ Running tests
 ```bash
 yarn test
 ```
+## Index js location
+Go to here for our indexjs: https://midnightstardust.github.io/cs4215new/index.js
+
+
 
 # using ANTLR with "SourceAcademy Conductor" 
 
