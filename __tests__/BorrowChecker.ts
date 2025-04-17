@@ -8,7 +8,7 @@ const positiveTestCases: Array<[string, string]> = [
 `
 fn main() {
     let x : Vec<i32>;
-    x = vec![1, 2, 3];
+    x = Vec::with_capacity(3);
     return;
 }
 `],
@@ -17,10 +17,10 @@ fn main() {
 `
 fn main() {
     let x : Vec<i32>;
-    x = vec![1, 2, 3];
+    x = Vec::with_capacity(3);
     {
         let x : Vec<i32>;
-        x = vec![4, 5, 6];
+        x = Vec::with_capacity(3);
     }
     return;
 }
@@ -29,31 +29,36 @@ fn main() {
 ["Access correct shadow variable",
 `
 fn main() {
-    let x : Vec<i32> = vec![1, 2, 3];
+    let x : Vec<i32>;
+    x = Vec::with_capacity(3);
     {
-        let x : Vec<i32> = vec![4, 5, 6];
+        let x : Vec<i32>;
+        x = Vec::with_capacity(3);
         let y : Vec<i32> = x;
     }
-    let y : Vec<i32> = x;
+    let y : Vec<i32>;
+    y = x;
     return;
 }
 `],
 
 ["Function values",
 `
-fn foo() -> Vec<i32> { return vec![0, 1, 2]; }
+fn foo() -> Vec<i32> { return Vec::with_capacity(3); }
 fn main() {
-    let x : Vec<i32> = foo();
+    let x : Vec<i32>;
+    x = foo();
     return;
 }
 `],
 
 ["Function call",
 `
-fn print(x: Vec<i32>) {}
+fn foo(x: Vec<i32>) {}
 fn main() {
-    let x : Vec<i32> = vec![1, 2, 3];
-    print(x);
+    let x : Vec<i32>;
+    x = Vec::with_capacity(3);
+    foo(x);
     return;
 }
 `],
@@ -61,9 +66,10 @@ fn main() {
 ["Mutable variable",
 `
 fn main() {
-    let mut x : Vec<i32> = vec![1, 2, 3];
-    x = vec![4, 5, 6];
-    x = vec![7, 8, 9];
+    let mut x : Vec<i32>;
+    x = Vec::with_capacity(3);
+    x = Vec::with_capacity(3);
+    x = Vec::with_capacity(3);
     return;
 }
 `],
@@ -71,8 +77,10 @@ fn main() {
 ["Copy type",
 `
 fn main() {
-    let x : i32 = 1;
-    let y : i32 = x;
+    let x : i32;
+    x = 1;
+    let y : i32;
+    y = x;
     x;
     return;
 }
@@ -81,7 +89,8 @@ fn main() {
 ["Assigning array index",
 `
 fn main() {
-    let mut a : Vec<i32> = Vec::with_capacity(3);
+    let mut a : Vec<i32>;
+    a = Vec::with_capacity(3);
     a[0] = 1;
     return;
 }
@@ -105,8 +114,8 @@ const negativeTestCases: Array<[string, string]> = [
 `
 fn main() {
     let x : Vec<i32>;
-    x = vec![1, 2, 3];
-    x = vec![4, 5, 6];
+    x = Vec::with_capacity(3);
+    x = Vec::with_capacity(3);
     return;
 }
 `],
@@ -114,8 +123,10 @@ fn main() {
 ["Accessing variable moved by assignment",
 `
 fn main() {
-    let x : Vec<i32> = vec![1, 2, 3];
-    let y : Vec<i32> = x;
+    let x : Vec<i32>;
+    x = Vec::with_capacity(3);
+    let y : Vec<i32>;
+    y = x;
     x;
     return;
 }
@@ -125,8 +136,9 @@ fn main() {
 `
 fn print(x: Vec<i32>) {}
 fn main() {
-    let x : Vec<i32> = vec![1, 2, 3];
-    print(x);
+    let x : Vec<i32>;
+    x = Vec::with_capacity(3);
+    display(x);
     x;
     return;
 }
@@ -136,9 +148,11 @@ fn main() {
 `
 fn print(x: Vec<i32>) {}
 fn main() {
-    let x : Vec<i32> = vec![1, 2, 3];
-    let y : Vec<i32> = x;
-    print(x);
+    let x : Vec<i32>;
+    x = Vec::with_capacity(3);
+    let y : Vec<i32>;
+    y = x;
+    display(x);
     return;
 }
 `
@@ -147,7 +161,8 @@ fn main() {
 ["Assigning from un-declared variable",
 `
 fn main() {
-    let x : Vec<i32> = y;
+    let x : Vec<i32>;
+    x = y;
     return;
 }
 `
@@ -157,7 +172,8 @@ fn main() {
 `
 fn main() {
     let y : Vec<i32>;
-    let x : Vec<i32> = y;
+    let x : Vec<i32>;
+    x = y;
     return;
 }
 `
@@ -167,7 +183,8 @@ fn main() {
 `
 fn foo(x: Vec<i32>) -> Vec<i32> { return x; }
 fn main() {
-    let x : Vec<i32> = vec![1, 2, 3];
+    let x : Vec<i32>;
+    x = Vec::with_capacity(3);
     foo(x);
     x;
     return;
@@ -179,7 +196,8 @@ fn main() {
 `
 fn foo(x: Vec<i32>) -> Vec<i32> { return x; }
 fn main() {
-    let x : Vec<i32> = vec![1, 2, 3];
+    let x : Vec<i32>;
+    x = Vec::with_capacity(3);
     let y : Vec<i32>;
     y = foo(x);
     x;
@@ -191,7 +209,8 @@ fn main() {
 ["Accessing moved array",
 `
 fn main() {
-    let mut a : Vec<i32> = Vec::with_capacity(3);
+    let mut a : Vec<i32>;
+    a = Vec::with_capacity(3);
     a[0] = 1;
     display(a[0]);
     a;
