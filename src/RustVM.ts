@@ -176,12 +176,12 @@ class RuntimeStack {
 class Heap {
   private buffer: ArrayBuffer;
   private dataView: DataView;
-  private freeBlocks: { start: number; size: number }[];
+  private freeWords: boolean[];
 
   constructor(sizeInWords: number) {
     this.buffer = new ArrayBuffer(sizeInWords * WORD_SIZE);
     this.dataView = new DataView(this.buffer);
-    this.freeBlocks = [{ start: 0, size: sizeInWords }];
+    this.freeWords = new Array(sizeInWords).fill(true);
   }
 
   load(address: number): number {
@@ -194,22 +194,29 @@ class Heap {
     this.dataView.setInt32(byteOffset, value, true);
   }
 
+  private setFreeWords(start: number, size: number, value: boolean): void {
+    for (let i = start; i < start + size; i++) {
+      this.freeWords[i] = value;
+    }
+  }
+
   malloc(szWords: number): number {
     const requiredSize = szWords + 1; // Including header
-    for (let i = 0; i < this.freeBlocks.length; i++) {
-      const block = this.freeBlocks[i];
-      if (block.size >= requiredSize) {
-        // Allocate from this block
-        this.freeBlocks.splice(i, 1);
-        const allocatedStart = block.start;
-        const remainingSize = block.size - requiredSize;
-        if (remainingSize > 0) {
-          this.freeBlocks.push({ start: allocatedStart + requiredSize, size: remainingSize });
+    for (let i = 0; i <= this.freeWords.length - requiredSize; i++) {
+      if (this.freeWords[i]) {
+        let allFree = true;
+        for (let j = 0; j < requiredSize; j++) {
+          if (!this.freeWords[i + j]) {
+            allFree = false;
+            break;
+          }
         }
-        // Write header (size szWords)
-        this.assign(allocatedStart, szWords);
-        // Return the address after the header
-        return allocatedStart + 1;
+        if (allFree) {
+          this.setFreeWords(i, requiredSize, false);
+          const address = i + 1;
+          this.assign(address - 1, szWords);
+          return address;
+        }
       }
     }
     return -1; // Indicate failure
@@ -219,19 +226,7 @@ class Heap {
     const headerAddress = address - 1;
     const szWords = this.load(headerAddress);
     const blockSize = szWords + 1;
-    const newBlock = { start: headerAddress, size: blockSize };
-    this.freeBlocks.push(newBlock);
-    // Merge adjacent blocks
-    this.freeBlocks.sort((a, b) => a.start - b.start);
-    for (let i = 0; i < this.freeBlocks.length - 1; i++) {
-      const current = this.freeBlocks[i];
-      const next = this.freeBlocks[i + 1];
-      if (current.start + current.size === next.start) {
-        current.size += next.size;
-        this.freeBlocks.splice(i + 1, 1);
-        i--; // Re-check current with new next
-      }
-    }
+    this.setFreeWords(headerAddress, blockSize, true);
   }
 }
 
