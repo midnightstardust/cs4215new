@@ -134,7 +134,6 @@ fn main() {
 
 ["Accessing variable moved by function call",
 `
-fn print(x: Vec<i32>) {}
 fn main() {
     let x : Vec<i32>;
     x = Vec::with_capacity(3);
