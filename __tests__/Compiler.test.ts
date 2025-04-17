@@ -163,8 +163,10 @@ describe('testing compiler', () => {
   it('variable declarations should return the correct value', () => {
     const code = `
       fn main() {
-        let a = 1;
-        let b = 2;
+        let a: i32;
+        a = 1;
+        let b: i32;
+        b = 2;
         a;
       }
     `;
@@ -176,7 +178,8 @@ describe('testing compiler', () => {
   it('assignment operator works', () => {
     const code = `
       fn main() {
-        let a = 1;
+        let a: i32;
+        a = 1;
         a = a + 1;
         a;
       }
